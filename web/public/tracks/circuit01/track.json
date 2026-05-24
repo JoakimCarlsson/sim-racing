@@ -1,0 +1,22 @@
+{
+  "id": "circuit01",
+  "name": "Circuit 01",
+  "spawnPoints": [
+    {
+      "pos": [0, 0, 0],
+      "rot": [0, 0, 0, 1]
+    }
+  ],
+  "startFinish": {
+    "p0": [-5, 0, 0],
+    "p1": [5, 0, 0],
+    "normal": [0, 0, 1]
+  },
+  "sectors": [],
+  "limitsPolygon": [
+    [-50, -50],
+    [50, -50],
+    [50, 50],
+    [-50, 50]
+  ]
+}

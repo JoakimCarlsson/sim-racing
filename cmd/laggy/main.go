@@ -46,7 +46,9 @@ func computeDelay(opts proxyOptions, rng *rand.Rand, prev time.Time) (
 	var jitterOffset time.Duration
 	if jitterRange > 0 {
 		// uniform in [-jitter, +jitter)
-		jitterOffset = time.Duration(rng.Int63n(int64(jitterRange))) - opts.jitter
+		jitterOffset = time.Duration(
+			rng.Int63n(int64(jitterRange)),
+		) - opts.jitter
 	}
 	raw := opts.latency + jitterOffset
 	if raw < 0 {
@@ -96,7 +98,11 @@ func relayDirection(
 		shouldDrop := opts.drop > 0 && rng.Float64() < opts.drop
 		if shouldDrop {
 			dropped.Add(1)
-			log.Printf("[laggy] %s dropped frame (%d total)", label, dropped.Load())
+			log.Printf(
+				"[laggy] %s dropped frame (%d total)",
+				label,
+				dropped.Load(),
+			)
 			continue
 		}
 
@@ -169,8 +175,26 @@ func handleConn(
 	var dropped atomic.Int64
 	done := make(chan struct{}, 2)
 
-	go relayDirection(ctx, clientConn, serverConn, opts, rngCS, &dropped, "c→s", done)
-	go relayDirection(ctx, serverConn, clientConn, opts, rngSC, &dropped, "s→c", done)
+	go relayDirection(
+		ctx,
+		clientConn,
+		serverConn,
+		opts,
+		rngCS,
+		&dropped,
+		"c→s",
+		done,
+	)
+	go relayDirection(
+		ctx,
+		serverConn,
+		clientConn,
+		opts,
+		rngSC,
+		&dropped,
+		"s→c",
+		done,
+	)
 
 	// Wait for the first direction to finish; cancel context to stop the other.
 	<-done
@@ -197,8 +221,18 @@ func main() {
 	)
 
 	flag.StringVar(&listenAddr, "listen", ":9090", "proxy listen address")
-	flag.StringVar(&targetHost, "target", "localhost:8080", "upstream server host:port")
-	flag.DurationVar(&latency, "latency", 75*time.Millisecond, "base one-way latency")
+	flag.StringVar(
+		&targetHost,
+		"target",
+		"localhost:8080",
+		"upstream server host:port",
+	)
+	flag.DurationVar(
+		&latency,
+		"latency",
+		75*time.Millisecond,
+		"base one-way latency",
+	)
 	flag.DurationVar(&jitter, "jitter", 20*time.Millisecond, "one-way jitter ±")
 	flag.Float64Var(&drop, "drop", 0.0, "frame drop probability [0,1)")
 	flag.Parse()
@@ -216,8 +250,14 @@ func main() {
 		handleConn(w, r, opts)
 	})
 
-	log.Printf("[laggy] listening on %s (target=%s latency=%v jitter=%v drop=%.2f)",
-		listenAddr, targetHost, latency, jitter, drop)
+	log.Printf(
+		"[laggy] listening on %s (target=%s latency=%v jitter=%v drop=%.2f)",
+		listenAddr,
+		targetHost,
+		latency,
+		jitter,
+		drop,
+	)
 
 	if err := http.ListenAndServe(listenAddr, mux); err != nil { //nolint:gosec
 		log.Fatalf("[laggy] server error: %v", err)
