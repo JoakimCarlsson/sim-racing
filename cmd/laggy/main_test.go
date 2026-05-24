@@ -34,7 +34,10 @@ func TestComputeDelay_NoJitter(t *testing.T) {
 // all 1000 samples land in [80,120]ms.
 func TestComputeDelay_JitterBounds(t *testing.T) {
 	t.Parallel()
-	opts := proxyOptions{latency: 100 * time.Millisecond, jitter: 20 * time.Millisecond}
+	opts := proxyOptions{
+		latency: 100 * time.Millisecond,
+		jitter:  20 * time.Millisecond,
+	}
 	rng := rand.New(rand.NewSource(99))
 	lo := 80 * time.Millisecond
 	hi := 120 * time.Millisecond
@@ -54,7 +57,10 @@ func TestComputeDelay_JitterBounds(t *testing.T) {
 func TestComputeDelay_NegativeClampedToZero(t *testing.T) {
 	t.Parallel()
 	// latency=1ms jitter=50ms → many samples will be negative raw delay.
-	opts := proxyOptions{latency: 1 * time.Millisecond, jitter: 50 * time.Millisecond}
+	opts := proxyOptions{
+		latency: 1 * time.Millisecond,
+		jitter:  50 * time.Millisecond,
+	}
 	rng := rand.New(rand.NewSource(0))
 
 	gotZero := false
@@ -121,7 +127,11 @@ func proxyHandlerFor(opts proxyOptions) http.Handler {
 
 // startProxy creates an httptest.Server running the proxy pointed at
 // upstreamHost (host:port).
-func startProxy(t *testing.T, upstreamHost string, opts proxyOptions) *httptest.Server {
+func startProxy(
+	t *testing.T,
+	upstreamHost string,
+	opts proxyOptions,
+) *httptest.Server {
 	t.Helper()
 	opts.targetHost = upstreamHost
 	srv := httptest.NewServer(proxyHandlerFor(opts))
@@ -185,7 +195,8 @@ func TestProxy_ForwardsFramesInOrder_NoLossNoDelay(t *testing.T) {
 		if elapsed >= 5*time.Millisecond {
 			t.Logf(
 				"WARNING: frame %d RTT=%v exceeded 5ms (may be acceptable on slow CI)",
-				i, elapsed,
+				i,
+				elapsed,
 			)
 		}
 	}
