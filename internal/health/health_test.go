@@ -34,6 +34,9 @@ func TestStatus_UptimeSeconds_Increases(t *testing.T) {
 	result := svc.Status()
 
 	if result.UptimeSeconds < 9 {
-		t.Errorf("expected uptime >= 9s for 10s-old service, got %d", result.UptimeSeconds)
+		t.Errorf(
+			"expected uptime >= 9s for 10s-old service, got %d",
+			result.UptimeSeconds,
+		)
 	}
 }

@@ -31,3 +31,6 @@ web/public/physics.wasm
 
 # OS
 Thumbs.db
+
+# Pipeline run logs
+.pipeline-runs/

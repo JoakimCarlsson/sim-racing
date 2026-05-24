@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+  exclusions:
+    # Exclude third-party Go code vendored via node_modules.
+    paths:
+      - "web/node_modules"
+      - "deps"
+    rules:
+      # Test helpers often intentionally ignore websocket Close errors.
+      - path: "_test\\.go"
+        linters:
+          - errcheck
