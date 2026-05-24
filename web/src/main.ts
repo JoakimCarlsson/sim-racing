@@ -55,7 +55,8 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   // 3. WebSocket + input pipeline
   // -------------------------------------------------------------------------
-  const sock = new Socket();
+  const wsUrl = import.meta.env.VITE_SERVER_WS_URL;
+  const sock = new Socket(wsUrl);
 
   const keyboard = new KeyboardSource();
   const sampler = new InputSampler(keyboard);
