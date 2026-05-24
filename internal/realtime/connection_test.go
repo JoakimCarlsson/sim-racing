@@ -636,3 +636,97 @@ func TestSendSnapshotDropsWhenFull(t *testing.T) {
 	client.Close(websocket.StatusNormalClosure, "done")
 	closedWg.Wait()
 }
+
+// TestSendSnapshotAfterCloseDoesNotPanic is a regression test for the race
+// condition where a broadcaster goroutine calls SendSnapshot on a Conn whose
+// Serve teardown has already closed the outbound channel.
+//
+// The test connects a real WebSocket, lets Serve start (so the outbound channel
+// is initialised and the closed flag is false), closes the client to trigger
+// Serve's teardown path, then hammers SendSnapshot from many goroutines.
+// No panic must occur; DropCount may or may not increment.
+func TestSendSnapshotAfterCloseDoesNotPanic(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		srvConn  *realtime.Conn
+		closedWg sync.WaitGroup
+	)
+	closedWg.Add(1)
+
+	srv := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: []string{"*"},
+			})
+			if err != nil {
+				t.Errorf("accept: %v", err)
+				return
+			}
+			c := &realtime.Conn{
+				ID: 1,
+				WS: ws,
+			}
+			mu.Lock()
+			srvConn = c
+			mu.Unlock()
+			_ = c.Serve(r.Context())
+			closedWg.Done()
+		}),
+	)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	ctx := context.Background()
+	client, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	// Wait until the server Conn is available (Serve has started and outbound
+	// channel is initialised).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		c := srvConn
+		mu.Unlock()
+		if c != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	c := srvConn
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("srvConn never set")
+	}
+
+	// Close the client to trigger Serve's teardown (sets closed flag, closes
+	// outbound channel).
+	client.Close(websocket.StatusNormalClosure, "done")
+	closedWg.Wait()
+
+	// Now hammer SendSnapshot from many goroutines concurrently.  Any panic
+	// here would be caught by the test runtime and fail the test.
+	const goroutines = 50
+	const sendsPerGoroutine = 100
+	payload := []byte{0x02, 0x01, 0x00, 0x00}
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < sendsPerGoroutine; j++ {
+				c.SendSnapshot(payload, 0)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// If we reach here without a panic, the race condition guard is working.
+	t.Logf(
+		"completed %d concurrent SendSnapshot calls after close without panic",
+		goroutines*sendsPerGoroutine,
+	)
+}

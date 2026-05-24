@@ -90,6 +90,10 @@ type Conn struct {
 	// SendSnapshot enqueues with a non-blocking select; full = drop.
 	outbound  chan []byte
 	dropCount atomic.Uint64
+
+	// closed is set to true just before outbound is closed in Serve's teardown.
+	// SendSnapshot checks this flag to avoid sending on a closed channel.
+	closed atomic.Bool
 }
 
 // InvalidCount returns the total number of invalid frames received since the
@@ -112,6 +116,9 @@ func (c *Conn) DropCount() uint64 {
 // SendSnapshot is safe to call from any goroutine concurrently.
 func (c *Conn) SendSnapshot(payload []byte, lastAckedSeq uint32) {
 	if c.outbound == nil {
+		return
+	}
+	if c.closed.Load() {
 		return
 	}
 	cp := make([]byte, len(payload))
@@ -316,7 +323,9 @@ func (c *Conn) Serve(ctx context.Context) error {
 		c.ringMu.Unlock()
 	}
 
-	// Close the outbound channel so the writer goroutine can exit cleanly.
+	// Signal SendSnapshot to stop enqueuing before closing the channel, so
+	// concurrent broadcaster calls cannot send on a closed channel.
+	c.closed.Store(true)
 	close(c.outbound)
 	<-writerDone
 
