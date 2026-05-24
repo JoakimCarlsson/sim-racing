@@ -3,6 +3,8 @@
  *
  * AC2: ~60 frames/sec when socket open.
  * AC4: seq monotonic, never repeats across disconnect/reconnect.
+ * onTick: called N times with monotonic seq on successful send; NOT called on
+ *         failed send (socket closed or rate-guard skip).
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -152,5 +154,71 @@ describe('InputSender seq', () => {
   test('(AC2/AC4) MIN_INTERVAL_MS=8 (125Hz ceiling) and TARGET_INTERVAL_MS≈16.67ms', () => {
     expect(MIN_INTERVAL_MS).toBe(8);
     expect(TARGET_INTERVAL_MS).toBeCloseTo(1000 / 60, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onTick callback tests
+// ---------------------------------------------------------------------------
+
+describe('InputSender onTick', () => {
+  test('onTick called with monotonic seq on each successful send', async () => {
+    const fake = makeFakeSocket();
+    const seqsReceived: number[] = [];
+
+    const sender = new InputSender(makeFakeSampler(), fake.socket, {
+      now: () => performance.now(),
+      onTick: (seq) => {
+        seqsReceived.push(seq);
+      },
+    });
+
+    sender.start();
+    await new Promise((resolve) => setTimeout(resolve, 200)); // ~12 ticks
+    sender.stop();
+
+    // Must have received at least some ticks.
+    expect(seqsReceived.length).toBeGreaterThan(0);
+
+    // Seq values must be monotonically increasing from 0.
+    for (let i = 0; i < seqsReceived.length; i++) {
+      expect(seqsReceived[i]).toBe(i);
+    }
+
+    // Number of frames sent == number of onTick calls.
+    expect(seqsReceived.length).toBe(fake.frames.length);
+  });
+
+  test('onTick NOT called when socket is closed (failed send)', async () => {
+    const fake = makeFakeSocket();
+    fake.openState = false; // socket starts closed
+
+    let tickCount = 0;
+    const sender = new InputSender(makeFakeSampler(), fake.socket, {
+      now: () => performance.now(),
+      onTick: () => {
+        tickCount += 1;
+      },
+    });
+
+    sender.start();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    sender.stop();
+
+    expect(tickCount).toBe(0);
+    expect(fake.frames).toHaveLength(0);
+  });
+
+  test('backward-compatible: passing now as bare function still works', async () => {
+    const fake = makeFakeSocket();
+    // Old-style constructor: third arg is a bare () => number function.
+    const sender = new InputSender(makeFakeSampler(), fake.socket, () => performance.now());
+
+    sender.start();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    sender.stop();
+
+    // Should have sent some frames without throwing.
+    expect(fake.frames.length).toBeGreaterThan(0);
   });
 });
