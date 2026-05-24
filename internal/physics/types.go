@@ -23,9 +23,11 @@ type State struct {
 	// Orientation is a unit quaternion [x, y, z, w] representing the vehicle
 	// orientation in world space.
 	Orientation [4]float32 `json:"orientation"`
-	// LinearVel is the centre-of-mass velocity in world space (m/s).
+	// LinearVel is the centre-of-mass velocity in vehicle-space (body frame):
+	// X right, Y up, Z forward, m/s. NOT world-space.
 	LinearVel [3]float32 `json:"linearVel"`
-	// AngularVel is the angular velocity about each world axis (rad/s).
+	// AngularVel is the vehicle-space angular velocity about body axes
+	// (X pitch, Y yaw, Z roll), rad/s. NOT world-space.
 	AngularVel [3]float32 `json:"angularVel"`
 	// RPM is the engine crankshaft rotational speed (rev/min).
 	RPM float32 `json:"rpm"`
@@ -113,6 +115,30 @@ type Constants struct {
 	// RedlineRPM is the maximum safe engine speed (rev/min). RPM is clamped
 	// to this value.
 	RedlineRPM float32 `json:"redlineRPM"`
+
+	// --- Lateral dynamics fields ---
+
+	// PacejkaB is the stiffness factor B in the simplified Pacejka magic
+	// formula: Fy = D * sin(C * atan(B * alpha)). Higher B = stiffer tyre
+	// (reaches peak at smaller slip angle).
+	PacejkaB float32 `json:"pacejkaB"`
+
+	// PacejkaC is the shape factor C in the Pacejka formula. Typical value
+	// ~1.3 for car tyres.
+	PacejkaC float32 `json:"pacejkaC"`
+
+	// PacejkaD is the peak lateral force factor D. D * WheelLoad gives the
+	// peak lateral force per axle (dimensionless friction coefficient-like
+	// multiplier). Typical value ~1.5-2.0 for performance tyres.
+	PacejkaD float32 `json:"pacejkaD"`
+
+	// YawInertia is the vehicle's moment of inertia about the vertical (yaw)
+	// axis (kg·m²). Typical value 1500-2500 kg·m² for a sports car.
+	YawInertia float32 `json:"yawInertia"`
+
+	// WeightDistributionFront is the fraction of total vehicle weight on the
+	// front axle (0-1). Default 0.5 = 50/50 split.
+	WeightDistributionFront float32 `json:"weightDistributionFront"`
 }
 
 // DefaultConstants provides a reasonable starting-point vehicle configuration
@@ -154,4 +180,16 @@ var DefaultConstants = Constants{
 	MaxBrakeForce:        14000, // ~1.2 g deceleration at 1200 kg
 	IdleRPM:              900,
 	RedlineRPM:           7000,
+
+	// Pacejka magic formula coefficients tuned for ~1.0 g peak lateral
+	// acceleration. B=10 (stiff), C=1.3 (car tyre shape), D=1.0 (peak mu).
+	PacejkaB: 10.0,
+	PacejkaC: 1.3,
+	PacejkaD: 1.0,
+
+	// YawInertia for a ~1200 kg sports car (~1.3 m² polar radius of gyration).
+	YawInertia: 2000,
+
+	// 50/50 front/rear weight distribution.
+	WeightDistributionFront: 0.5,
 }
