@@ -3,10 +3,11 @@
 Each `/pipeline` run (or its Cursor/VS Code equivalent) writes a JSON-Lines log so we can see which stages cost what and where failures cluster. The log lives at:
 
 ```
-.pipeline-runs/<issue-number>/<run-id>.jsonl
+.pipeline-runs/milestone-<slug>/<run-id>.jsonl     # milestone-loop variant
+.pipeline-runs/<issue-number>/<run-id>.jsonl       # single-issue variant
 ```
 
-`<run-id>` is `YYYYMMDD-HHMMSS-<6-hex>` (UTC). The `.pipeline-runs/` directory is gitignored; aggregated stats can be committed separately.
+`<slug>` is the milestone title lowercased with non-alphanumerics collapsed to `-`. `<run-id>` is `YYYYMMDD-HHMMSS-<6-hex>` (UTC). One run id covers an entire milestone loop; every issue's stages share it, and the `issue_number` field on each row disambiguates. The `.pipeline-runs/` directory is gitignored; aggregated stats can be committed separately.
 
 ## Row schema (one row per stage invocation)
 
@@ -37,14 +38,14 @@ Each `/pipeline` run (or its Cursor/VS Code equivalent) writes a JSON-Lines log 
 | `run_id`            | string  | unique per `/pipeline` invocation |
 | `issue_number`      | integer | from the handoff envelope |
 | `pr_url`            | string? | null before the coder opens the PR |
-| `stage`             | enum    | `planner` / `red-team` / `coder` / `smoke-tester` / `reviewer` |
+| `stage`             | enum    | `planner` / `red-team` / `coder` / `smoke-tester` / `reviewer` / `merge` |
 | `agent`             | string  | subagent type or label (e.g. `red-team`) |
 | `model`             | string  | concrete model id |
 | `attempt`           | integer | 1 on first call, 2+ on retries |
 | `tokens_in`         | integer | best-effort from the Agent tool result |
 | `tokens_out`        | integer | best-effort from the Agent tool result |
 | `duration_ms`       | integer | wall time spent in this stage |
-| `verdict`           | string  | the `HANDOFF:*` type emitted, or `ERROR` |
+| `verdict`           | string  | the `HANDOFF:*` type emitted, `MERGED` / `MERGE_FAILED` for merge rows, `SKIPPED` for issues skipped at loop entry, or `ERROR` |
 | `failure_signature` | string? | 12-char hash from `docs/pipeline-handoff-schema.md` |
 | `notes`             | string? | one-line free text |
 
