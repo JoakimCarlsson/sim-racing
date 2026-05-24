@@ -7,7 +7,7 @@ import (
 )
 
 // TestDefaultConstantsValid asserts that DefaultConstants has sensible non-zero
-// values for all scalar fields (AC1).
+// values for all scalar fields, including the new longitudinal parameters.
 func TestDefaultConstantsValid(t *testing.T) {
 	c := physics.DefaultConstants
 	if c.Mass <= 0 {
@@ -20,70 +20,92 @@ func TestDefaultConstantsValid(t *testing.T) {
 		t.Errorf("DefaultConstants.TrackWidth = %v, want > 0", c.TrackWidth)
 	}
 	if c.MaxEngineTorque <= 0 {
-		t.Errorf("DefaultConstants.MaxEngineTorque = %v, want > 0", c.MaxEngineTorque)
+		t.Errorf(
+			"DefaultConstants.MaxEngineTorque = %v, want > 0",
+			c.MaxEngineTorque,
+		)
 	}
 	if c.DragCoeff <= 0 {
 		t.Errorf("DefaultConstants.DragCoeff = %v, want > 0", c.DragCoeff)
 	}
 	if c.DownforceCoeff <= 0 {
-		t.Errorf("DefaultConstants.DownforceCoeff = %v, want > 0", c.DownforceCoeff)
+		t.Errorf(
+			"DefaultConstants.DownforceCoeff = %v, want > 0",
+			c.DownforceCoeff,
+		)
 	}
 	if len(c.GearRatios) == 0 {
 		t.Error("DefaultConstants.GearRatios must be non-empty")
 	}
 	if c.MaxSteerAngle <= 0 {
-		t.Errorf("DefaultConstants.MaxSteerAngle = %v, want > 0", c.MaxSteerAngle)
+		t.Errorf(
+			"DefaultConstants.MaxSteerAngle = %v, want > 0",
+			c.MaxSteerAngle,
+		)
+	}
+
+	// Longitudinal parameter checks.
+	if c.FinalDrive <= 0 {
+		t.Errorf("DefaultConstants.FinalDrive = %v, want > 0", c.FinalDrive)
+	}
+	if c.DrivetrainEfficiency <= 0 || c.DrivetrainEfficiency > 1 {
+		t.Errorf(
+			"DefaultConstants.DrivetrainEfficiency = %v, want (0, 1]",
+			c.DrivetrainEfficiency,
+		)
+	}
+	if c.WheelRadius <= 0 {
+		t.Errorf("DefaultConstants.WheelRadius = %v, want > 0", c.WheelRadius)
+	}
+	if c.RollingResistCoeff <= 0 {
+		t.Errorf(
+			"DefaultConstants.RollingResistCoeff = %v, want > 0",
+			c.RollingResistCoeff,
+		)
+	}
+	if c.FrontalArea <= 0 {
+		t.Errorf("DefaultConstants.FrontalArea = %v, want > 0", c.FrontalArea)
+	}
+	if c.AirDensity <= 0 {
+		t.Errorf("DefaultConstants.AirDensity = %v, want > 0", c.AirDensity)
+	}
+	if c.MaxBrakeForce <= 0 {
+		t.Errorf(
+			"DefaultConstants.MaxBrakeForce = %v, want > 0",
+			c.MaxBrakeForce,
+		)
+	}
+	if c.IdleRPM <= 0 {
+		t.Errorf("DefaultConstants.IdleRPM = %v, want > 0", c.IdleRPM)
+	}
+	if c.RedlineRPM <= c.IdleRPM {
+		t.Errorf(
+			"DefaultConstants.RedlineRPM = %v, want > IdleRPM (%v)",
+			c.RedlineRPM, c.IdleRPM,
+		)
+	}
+
+	// Torque curve must be in ascending RPM order and have non-zero torques.
+	for i, s := range c.TorqueCurve {
+		if s.Torque <= 0 {
+			t.Errorf("TorqueCurve[%d].Torque = %v, want > 0", i, s.Torque)
+		}
+		if i > 0 && s.RPM <= c.TorqueCurve[i-1].RPM {
+			t.Errorf(
+				"TorqueCurve not in ascending RPM order at index %d: %.0f <= %.0f",
+				i,
+				s.RPM,
+				c.TorqueCurve[i-1].RPM,
+			)
+		}
 	}
 }
 
 // TestZeroValueTypes verifies that zero-value Input and State can be constructed
-// without panics, satisfying AC1 structural completeness.
+// without panics.
 func TestZeroValueTypes(t *testing.T) {
 	var in physics.Input
 	var s physics.State
 	_ = in
 	_ = s
-}
-
-// TestStepReturnsInputUnchanged asserts that Step(s, in, c, dt) == s for all
-// zero inputs, exercising AC2.
-func TestStepReturnsInputUnchanged(t *testing.T) {
-	var s physics.State
-	s.Position = [3]float32{1.0, 2.0, 3.0}
-	s.RPM = 3000
-	s.Gear = 2
-
-	var in physics.Input
-	c := physics.DefaultConstants
-	dt := float32(1.0 / 60.0)
-
-	got := physics.Step(s, in, c, dt)
-
-	if got.Position != s.Position {
-		t.Errorf("Step changed Position: got %v, want %v", got.Position, s.Position)
-	}
-	if got.RPM != s.RPM {
-		t.Errorf("Step changed RPM: got %v, want %v", got.RPM, s.RPM)
-	}
-	if got.Gear != s.Gear {
-		t.Errorf("Step changed Gear: got %v, want %v", got.Gear, s.Gear)
-	}
-	if got.Orientation != s.Orientation {
-		t.Errorf("Step changed Orientation: got %v, want %v", got.Orientation, s.Orientation)
-	}
-	if got.LinearVel != s.LinearVel {
-		t.Errorf("Step changed LinearVel: got %v, want %v", got.LinearVel, s.LinearVel)
-	}
-	if got.AngularVel != s.AngularVel {
-		t.Errorf("Step changed AngularVel: got %v, want %v", got.AngularVel, s.AngularVel)
-	}
-	if got.WheelLoad != s.WheelLoad {
-		t.Errorf("Step changed WheelLoad: got %v, want %v", got.WheelLoad, s.WheelLoad)
-	}
-	if got.WheelSlip != s.WheelSlip {
-		t.Errorf("Step changed WheelSlip: got %v, want %v", got.WheelSlip, s.WheelSlip)
-	}
-	if got.Grounded != s.Grounded {
-		t.Errorf("Step changed Grounded: got %v, want %v", got.Grounded, s.Grounded)
-	}
 }
