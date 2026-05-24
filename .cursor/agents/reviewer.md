@@ -14,7 +14,7 @@ You are the quality gate before merge. You **never** edit source files (no featu
 **Two outcomes only:**
 
 1. **Blocking issues** → emit `HANDOFF:FIX` and **immediately** delegate to **coder** (no commit/push/PR).
-2. **Approved** → **commit, push, and open the PR** via `gh` (always your job on approval, not the user's).
+2. **Approved** → **commit, push, open the PR, wait for CI green, then merge** (`gh pr merge --squash --delete-branch`). On a successful merge, look up the next open issue in the same milestone and re-invoke the **planner** via the Task tool. If the milestone is empty, stop.
 
 After coder fixes a `HANDOFF:FIX` from you, the pipeline continues: coder → smoke-tester → reviewer again.
 
@@ -173,7 +173,15 @@ retrospective: |
   or saved a review cycle. If nothing, write "nothing to record". Always emit
   this field, even on CLEAN verdicts.>
 
-next_agent: none
+merge_result:                # filled in after step 4 (merge) below
+  status: MERGED | SKIPPED | FAILED
+  sha: <merge commit SHA or null>
+  notes: <one line — e.g. "merged via squash, branch deleted" or failure reason>
+
+milestone: <milestone title or "none">
+next_open_issue: <N or null>  # next open issue in same milestone after merge, or null if empty
+
+next_agent: planner | none    # planner when next_open_issue is set AND merge_result.status == MERGED; otherwise none
 ---END HANDOFF---
 ```
 
@@ -250,13 +258,62 @@ If a PR already exists for this branch, comment on it or update it instead of cr
 
 Prefer `Closes #N` in the PR body so merge closes the issue. Only run `gh issue close` separately if the PR cannot link the issue.
 
-Report **PR URL**, branch name, and commit SHA to the user.
+### 5. Wait for CI green and merge (required on approval)
+
+After the PR is open, poll CI until it settles, then squash-merge and delete the branch:
+
+```bash
+PR_NUMBER=<from gh pr create>
+gh pr checks "$PR_NUMBER" --watch --fail-fast    # blocks until checks complete; non-zero exit if any fail
+gh pr view "$PR_NUMBER" --json mergeStateStatus,state
+# Sanity: state == OPEN, mergeStateStatus in {CLEAN, UNSTABLE}
+gh pr merge "$PR_NUMBER" --squash --delete-branch
+```
+
+Record the merge commit SHA from the merge output and fill `merge_result` in the `HANDOFF:APPROVED` block.
+
+**If `gh pr checks --watch` exits non-zero** (a required check failed after approval): do **not** merge. Emit `HANDOFF:FIX` with `failure_signature: { stage: reviewer, class: ci, symbol: "<failing check name>" }` and delegate to coder. Skip step 6.
+
+**If `gh pr merge` fails** (branch protection, conflict, missing required check): set `merge_result.status: FAILED` with the gh stderr in `notes`, set `next_agent: none`, post the report, and **stop**. Do not retry; do not advance to the next issue.
+
+**On successful merge**, fast-forward your local default branch so the next planner starts on clean main:
+
+```bash
+DEFAULT=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+git switch "$DEFAULT" && git pull --ff-only origin "$DEFAULT"
+```
+
+### 6. Find the next issue and loop (required on successful merge)
+
+Pick the next open issue in the same milestone (priority labels win, else lowest number; skip issues labeled `blocked` / `wontfix` / `needs-triage` or assigned to someone else):
+
+```bash
+MILESTONE="<from HANDOFF:PLAN.milestone>"
+gh issue list --milestone "$MILESTONE" --state open \
+  --json number,title,labels,assignees \
+  --jq 'sort_by((.labels|map(.name)|map(select(test("^priority:")))|.[0]//"priority:zzz"), .number)
+        | map(select((.labels|map(.name)|inside(["blocked","wontfix","needs-triage"])|not)))
+        | .[0]'
+```
+
+- **If a next issue exists** — set `next_open_issue` to its number, `next_agent: planner`. Then **immediately** invoke the **Task** tool with `subagent_type: planner` and a prompt that names the next issue:
+
+  > Run the planner workflow for issue #<next_open_issue> in milestone "<MILESTONE>". The previous issue has been merged (see HANDOFF:APPROVED below). Follow your standard workflow: read AGENTS.md / `.cursor/agents/_bastion-conventions.md` / `docs/backend-architecture.md` / `docs/pipeline-handoff-schema.md` / `LEARNINGS.md`, create the task branch via `gh issue develop`, produce `HANDOFF:PLAN`, hand off to red-team.
+  >
+  > <paste full HANDOFF:APPROVED block>
+
+- **If no next issue** — set `next_open_issue: null`, `next_agent: none`, print a one-line summary (`milestone <name> empty — N issues merged this run`), and stop.
+
+### 7. Report
+
+Report **PR URL**, branch name, commit SHA, **merge SHA**, and (if looping) the next issue number being handed to the planner.
 
 ## Constraints
 
 - **No source edits** — no `Write`/`StrReplace` on application code; review via diff and commands only
-- **Git/gh allowed** — commit, push, and `gh pr create` are required on approval
+- **Git/gh allowed** — commit, push, `gh pr create`, `gh pr checks --watch`, and `gh pr merge --squash --delete-branch` are all required on approval
 - Do not re-implement fixes; send `HANDOFF:FIX` to coder
 - Use `gh` for GitHub (issues, PRs)
 - Never add Cursor/AI co-authorship on commits
 - Do not push force to `main`/`master`
+- Never retry a failed `gh pr merge` — surface and stop

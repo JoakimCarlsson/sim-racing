@@ -19,7 +19,16 @@ Read repo-root **AGENTS.md** first, then `.cursor/agents/_bastion-conventions.md
 
 - Starting work on a milestone issue
 - User asks: "what should we build next?", "plan this issue", "pick up the next task"
+- The **reviewer** re-invokes you after a successful merge to pick up the next open issue in the same milestone (see "Milestone loop" below)
 - No `HANDOFF:PLAN` exists yet for the current issue
+
+## Milestone loop
+
+The pipeline runs as a loop over a milestone: planner → red-team → coder → smoke-tester → reviewer → merge → **planner (next issue)** … until the milestone has no open issues left. You are the entry point of every iteration.
+
+- If the prompt names an issue number, plan that issue.
+- Else use the milestone in your context (from a prior `HANDOFF:APPROVED` block, or `gh api .../milestones` if starting fresh) and pick the highest-priority open issue (priority labels first, then lowest number). Skip issues labeled `blocked` / `wontfix` / `needs-triage` or assigned to someone else.
+- If no open issues remain in the milestone, do **not** invent work. Report `milestone empty — N issues completed this run` and stop. Do not emit `HANDOFF:PLAN`.
 
 ## Inputs
 

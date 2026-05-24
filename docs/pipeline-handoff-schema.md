@@ -29,7 +29,7 @@ Every handoff block must include:
 | `schema_version` | string  | Set to `"1"` for this document. Bump on breaking changes only.        |
 | `issue_number`   | integer | GitHub issue number this run is bound to.                             |
 | `issue_url`      | string  | Canonical `https://github.com/.../issues/N` URL.                      |
-| `next_agent`     | enum    | One of `planner`, `coder`, `smoke-tester`, `reviewer`, `none`.        |
+| `next_agent`     | enum    | One of `planner`, `red-team`, `coder`, `smoke-tester`, `reviewer`, `none`. Use `planner` on `HANDOFF:APPROVED` to chain into the milestone-loop's next issue. |
 
 Any handoff missing any of these four fields is **malformed** and must be rejected by the orchestrator.
 
@@ -212,7 +212,9 @@ next_agent: coder
 - `failure_signature` is mandatory. The orchestrator hashes `(stage, class, symbol)` and escalates to the user if the same hash repeats within a single issue run.
 - When `from_agent: reviewer`, `spec_conformance[]` must include every AC id from the plan; any `UNMET` row is a hard blocker.
 
-## `HANDOFF:APPROVED` (reviewer → user)
+## `HANDOFF:APPROVED` (reviewer → merge → planner | none)
+
+The reviewer merges the PR (squash + delete branch) as part of approval, then either re-invokes the planner on the next open issue in the same milestone (`next_agent: planner`) or stops the loop (`next_agent: none`) when the milestone is empty.
 
 ```yaml
 schema_version: "1"
@@ -238,12 +240,23 @@ non_blocking_notes:
 retrospective: |
   <The exact line appended to LEARNINGS.md, or "nothing to record">
 
-next_agent: none
+merge_result:               # required — outcome of `gh pr merge --squash --delete-branch`
+  status: MERGED | SKIPPED | FAILED
+  sha: <merge commit SHA, or null when SKIPPED/FAILED>
+  notes: <one line — e.g. "merged via squash, branch deleted" or failure reason>
+
+milestone: <milestone title or "none">
+next_open_issue: <N or null>   # number of the next open issue in the milestone, or null if empty
+
+next_agent: planner | none     # planner when next_open_issue is set; none when milestone is empty or merge failed
 ```
 
 **Validation rules:**
 - Every AC id from the originating plan must appear with `status: MET`.
 - `retrospective` is required (use `"nothing to record"` if nothing is worth keeping).
+- `merge_result.status` is required. `MERGED` requires a non-null `sha`. `FAILED` requires `notes` describing the gh error.
+- If `merge_result.status != MERGED`, `next_agent` MUST be `none` — do not loop on a failed merge.
+- If `next_agent: planner`, `next_open_issue` MUST be a positive integer; the orchestrator (or the reviewer in handoff-frontmatter flows) passes that issue number to the planner.
 
 ## Failure-signature hashing
 
@@ -255,11 +268,20 @@ hash = sha1(stage + "|" + class + "|" + symbol)[:12]
 
 If the same hash appears twice within an issue run, the orchestrator **does not** re-invoke the coder. It surfaces both failure summaries to the user and stops. This replaces the old "3 retries blindly" policy; the per-stage retry cap (3) is still the hard upper bound.
 
-## Per-issue token budget
+## Token budget
 
-The orchestrator tracks total tokens spent across all stages for an issue run. The default ceiling is **400 000 tokens**. When the ceiling is exceeded the orchestrator stops and surfaces a summary; the next stage is not invoked.
+The orchestrator tracks total tokens spent. In single-issue runs the ceiling applies per issue; in the **milestone-loop** variant the ceiling applies across the entire loop (every issue, every stage, including the merge step). The default is **400 000 tokens**. When the ceiling is exceeded the orchestrator stops and surfaces a summary; the next stage is not invoked, and no new issue is started.
 
-The ceiling is configurable per run via the `SIM_PIPELINE_BUDGET` environment variable (raw integer of tokens).
+The ceiling is configurable per run via the `BASTION_PIPELINE_BUDGET` environment variable (raw integer of tokens).
+
+## Milestone-loop semantics
+
+When invoked as `/pipeline <milestone-title>` (or when the reviewer's `HANDOFF:APPROVED` is wired through the Cursor/VS Code `handoffs:` frontmatter), the pipeline runs the full chain per issue and uses `HANDOFF:APPROVED.next_agent` to decide what happens after merge:
+
+- `next_agent: planner` — pop the next open issue from the milestone, reset per-issue counters (signature set, attempt counters), reuse the same run log, continue. The planner is invoked with the new `issue_number`.
+- `next_agent: none` — milestone is empty (or the merge failed). Print summary, stop.
+
+Per-issue `signatures_seen` resets between issues. The token budget does **not** reset. Failures, malformed handoffs, red-team REFUTED, repeat signatures, retry-cap hits, and merge failures all stop the whole loop — they never silently advance to the next issue.
 
 ## Validation contract
 

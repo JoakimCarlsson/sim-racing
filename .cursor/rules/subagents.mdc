@@ -19,18 +19,20 @@ alwaysApply: true
 | planner | `/planner` | Pick issue, `gh issue develop` → linked `task/<N>-<slug>` branch, plan (no source edits) |
 | coder | `/coder` | Implement from `HANDOFF:PLAN` or `HANDOFF:FIX` |
 | smoke-tester | `/smoke-tester` | Build, test, HTTP smoke checks |
-| reviewer | `/reviewer` | Final review; **blocking issues → `HANDOFF:FIX` → coder**; on approval **commits, pushes, opens PR** |
+| reviewer | `/reviewer` | Final review; **blocking issues → `HANDOFF:FIX` → coder**; on approval **commits, pushes, opens PR, waits for CI green, merges (squash + delete branch), then auto-loops to `/planner` for the next open issue in the same milestone** |
 
-**Delivery pipeline:** `/planner` → `/coder` → `/smoke-tester` → `/reviewer`
+**Delivery pipeline:** `/planner` → `/coder` → `/smoke-tester` → `/reviewer` → (merge) → `/planner` (next issue in milestone) … until the milestone is empty.
 
 **Auto-handoff (required):** When a pipeline agent finishes with a `HANDOFF` block and `next_agent` set, **immediately** delegate to that agent via the **Task** tool. Pass the **full** `HANDOFF` block unchanged in the Task prompt. Do **not** stop and ask the user to run the next slash command or paste the handoff manually.
 
 | HANDOFF | Next agent |
 |---------|------------|
-| `HANDOFF:PLAN` | `coder` |
+| `HANDOFF:PLAN` | `red-team`, then `coder` on UPHELD |
 | `HANDOFF:IMPLEMENTATION` | `smoke-tester` |
 | `HANDOFF:VERIFIED` | `reviewer` |
 | `HANDOFF:FIX` | `coder` (from smoke-tester **or reviewer**) |
+| `HANDOFF:APPROVED` with `next_agent: planner` | `planner` (loop into next milestone issue) |
+| `HANDOFF:APPROVED` with `next_agent: none` | stop — milestone empty or merge failed |
 
 **issue-creator** is standalone — no auto-chain after it.
 
@@ -55,5 +57,5 @@ Before smoke-testing, read `.cursor/verify-commands.md`. Update that file when t
 
 Never add AI/Cursor `Co-authored-by` trailers.
 
-- **Pipeline delivery:** the **reviewer** always commits (if needed), pushes, and opens the PR after approval — do not leave that to the user.
+- **Pipeline delivery:** the **reviewer** always commits (if needed), pushes, opens the PR, waits for CI green, and merges via `gh pr merge --squash --delete-branch` after approval. Do not leave any of that to the user. On a successful merge, the reviewer also re-invokes the **planner** on the next open issue in the same milestone (or stops if empty).
 - **Outside the pipeline:** commit only when the user explicitly asks.

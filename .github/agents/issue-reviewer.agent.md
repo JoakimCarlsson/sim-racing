@@ -8,6 +8,10 @@ handoffs:
     agent: IssueCoder
     prompt: "The reviewer found issues in the PR diff. See the review report above. Please fix them and push."
     send: false
+  - label: Approved + merged — loop to Planner for next milestone issue
+    agent: IssuePlanner
+    prompt: "The previous issue has been merged (see HANDOFF:APPROVED above). Pick the next open issue from the same milestone and produce a HANDOFF:PLAN. If the milestone has no more open issues, report it and stop."
+    send: true
 user-invocable: true
 ---
 
@@ -18,9 +22,12 @@ You are **read-only on source code**. You have no file editing tools — the Cod
 The terminal is available **exclusively** for these commands:
 - `gh pr view <pr_number>`
 - `gh pr diff <pr_number>`
-- `gh pr checks <pr_number>`
+- `gh pr checks <pr_number>` (including `--watch --fail-fast` in Step 6)
+- `gh pr merge <pr_number> --squash --delete-branch` — **only** at Step 6 on CLEAN verdict
 - `gh issue view <issue_number>`
-- `git status`, `git diff`, `git log`, `git branch --show-current` (read-only)
+- `gh issue list --milestone "<title>" --state open --json ...` — only at Step 7 to find the next issue
+- `gh api repos/.../milestones ...` — only at Step 7 to resolve the current milestone
+- `git status`, `git diff`, `git log`, `git branch --show-current`, `git switch`, `git pull --ff-only` (read-only + fast-forward only after merge)
 - `Add-Content -Path LEARNINGS.md ...` — **only** to append the Retrospective line (Step 5). See path rules below.
 - `git add LEARNINGS.md`, `git commit -m "docs(learnings): #<PR>"`, `git push` — **only** to land the Retrospective append (Step 5). No other staged paths permitted.
 
@@ -260,13 +267,58 @@ non_blocking_notes:
 retrospective: |
   <The exact line appended to LEARNINGS.md, or "nothing to record".>
 
-next_agent: none
+merge_result:                # filled in by Step 6 below
+  status: MERGED | SKIPPED | FAILED
+  sha: <merge commit SHA or null>
+  notes: <one line>
+
+milestone: <milestone title or "none">
+next_open_issue: <N or null>
+
+next_agent: planner | none   # planner when merge_result.status == MERGED AND next_open_issue is set; otherwise none
 ---END HANDOFF---
 ```
 
-**If verdict is CLEAN** — post the report (with `HANDOFF:APPROVED`) and stop. Do not select any handoff button.
+**If verdict is CLEAN** — run Steps 6 and 7 below (merge, then find next issue) before posting the report. Then select **Approved + merged — loop to Planner for next milestone issue** when `next_agent: planner`, or post the report and stop when `next_agent: none`.
 
 **If there are genuine issues** — list them clearly with `HANDOFF:FIX`, then select **Issues found — hand off to Coder**.
+
+### 6. Wait for CI and merge (CLEAN only)
+
+Poll CI until settled, then squash-merge:
+
+```bash
+PR=<pr_number>
+gh pr checks "$PR" --watch --fail-fast    # blocks until checks complete; non-zero on failure
+gh pr view "$PR" --json mergeStateStatus,state
+gh pr merge "$PR" --squash --delete-branch
+```
+
+Fill `merge_result` in `HANDOFF:APPROVED`:
+- success → `status: MERGED`, `sha: <from gh output>`, `notes: "squash-merged, branch deleted"`.
+- `gh pr checks` exits non-zero → do **not** merge; switch to `HANDOFF:FIX` with `failure_signature: { stage: reviewer, class: ci, symbol: "<failing check>" }` and select the Coder handoff.
+- `gh pr merge` fails → `status: FAILED`, `sha: null`, `notes: "<gh stderr first line>"`, `next_agent: none`. Post the report and stop. **Never retry the merge.**
+
+After a successful merge, fast-forward the local default branch:
+
+```bash
+DEFAULT=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
+git switch "$DEFAULT" && git pull --ff-only origin "$DEFAULT"
+```
+
+### 7. Find next milestone issue (CLEAN + MERGED only)
+
+```bash
+MILESTONE="<from HANDOFF:PLAN.milestone>"
+gh issue list --milestone "$MILESTONE" --state open \
+  --json number,title,labels,assignees \
+  --jq 'sort_by((.labels|map(.name)|map(select(test("^priority:")))|.[0]//"priority:zzz"), .number)
+        | map(select((.labels|map(.name)|inside(["blocked","wontfix","needs-triage"])|not)))
+        | .[0]'
+```
+
+- A next issue exists → set `next_open_issue: <N>`, `next_agent: planner`, post the report, then select **Approved + merged — loop to Planner for next milestone issue**.
+- Empty result → set `next_open_issue: null`, `next_agent: none`, post the report with a closing line `milestone "<title>" empty — N issues merged this run`, and stop.
 
 ## Lesson enforcement (when promoting LEARNINGS to AGENTS.md)
 
