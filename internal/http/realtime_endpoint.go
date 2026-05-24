@@ -22,7 +22,8 @@ func registerRealtime(r *router.Router, _ Deps) {
 			},
 		)
 		if err != nil {
-			// websocket.Accept has already written the error response (400/403).
+			// websocket.Accept writes 426 Upgrade Required when the request is
+			// not a valid WebSocket upgrade (LEARNINGS #54).
 			return
 		}
 
@@ -39,6 +40,9 @@ func registerRealtime(r *router.Router, _ Deps) {
 				} else {
 					log.Printf("ws close id=%d err=<nil>", id)
 				}
+			},
+			InvalidReasonLog: func(id uint64, reason realtime.InvalidReason, err error) {
+				log.Printf("ws invalid id=%d reason=%s err=%v", id, reason, err)
 			},
 		}
 
