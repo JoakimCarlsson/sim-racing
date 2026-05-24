@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/JoakimCarlsson/sim-racing/internal/sim"
 	"github.com/joakimcarlsson/minmux/router"
 )
 
@@ -12,6 +13,7 @@ import (
 type Deps struct {
 	StartedAt time.Time
 	Version   string
+	World     *sim.World
 }
 
 // NewHandler constructs the root http.Handler with all routes registered.
