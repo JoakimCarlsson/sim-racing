@@ -13,6 +13,9 @@ import (
 	"github.com/JoakimCarlsson/sim-racing/internal/sim"
 )
 
+// snapshotHz is the rate at which the broadcaster sends snapshots to clients.
+const snapshotHz = 30
+
 var version = "dev"
 
 func main() {
@@ -33,6 +36,7 @@ func main() {
 	defer stop()
 
 	go world.Run(ctx)
+	go world.RunBroadcaster(ctx, snapshotHz, time.Now)
 
 	handler := httpx.NewHandler(httpx.Deps{
 		StartedAt: time.Now(),

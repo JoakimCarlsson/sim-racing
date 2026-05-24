@@ -18,6 +18,10 @@ import (
 // input; a stale input from a lagging sender is less useful than nothing).
 const ringCap = 128
 
+// outboundCap is the capacity of the per-connection outbound snapshot channel.
+// When the channel is full SendSnapshot drops the frame (non-blocking).
+const outboundCap = 4
+
 // defaultMaxGear is the maximum forward gear used when Conn.MaxGear is zero.
 const defaultMaxGear int8 = 6
 
@@ -79,12 +83,44 @@ type Conn struct {
 
 	// --- invalid frame counter ---
 	invalidCount atomic.Uint32
+
+	// --- outbound snapshot channel ---
+	// outbound receives fully-encoded snapshot payloads from the broadcaster.
+	// The writer goroutine (started in Serve) drains it and writes to WS.
+	// SendSnapshot enqueues with a non-blocking select; full = drop.
+	outbound  chan []byte
+	dropCount atomic.Uint64
 }
 
 // InvalidCount returns the total number of invalid frames received since the
 // connection was opened.
 func (c *Conn) InvalidCount() uint32 {
 	return c.invalidCount.Load()
+}
+
+// DropCount returns the total number of outbound snapshot frames dropped due
+// to a full outbound buffer.
+func (c *Conn) DropCount() uint64 {
+	return c.dropCount.Load()
+}
+
+// SendSnapshot enqueues a snapshot payload for delivery to the client.
+// It copies payload into a fresh slice and attempts a non-blocking send on
+// the outbound channel. If the channel is full the frame is dropped and
+// DropCount is incremented.
+//
+// SendSnapshot is safe to call from any goroutine concurrently.
+func (c *Conn) SendSnapshot(payload []byte, lastAckedSeq uint32) {
+	if c.outbound == nil {
+		return
+	}
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
+	select {
+	case c.outbound <- cp:
+	default:
+		c.dropCount.Add(1)
+	}
 }
 
 // DrainInputs copies up to len(dst) buffered inputs (oldest-first) into dst
@@ -168,8 +204,24 @@ func (c *Conn) effectiveInvalidWindow() time.Duration {
 // layer in internal/http/realtime_endpoint.go; any error there is already
 // written to the response before Serve is called.
 //
+// Serve also starts a writer goroutine that drains outbound snapshot frames
+// from the outbound channel and sends them as binary WebSocket messages.
+//
 // Serve blocks until the connection is closed or ctx is cancelled.
 func (c *Conn) Serve(ctx context.Context) error {
+	// Initialise the outbound channel and start the writer goroutine.
+	c.outbound = make(chan []byte, outboundCap)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for payload := range c.outbound {
+			if err := c.WS.Write(ctx, websocket.MessageBinary, payload); err != nil {
+				// Connection gone; drain remaining frames and exit.
+				return
+			}
+		}
+	}()
+
 	if c.OnOpen != nil {
 		c.OnOpen(c.ID)
 	}
@@ -263,6 +315,10 @@ func (c *Conn) Serve(ctx context.Context) error {
 		c.enqueue(in)
 		c.ringMu.Unlock()
 	}
+
+	// Close the outbound channel so the writer goroutine can exit cleanly.
+	close(c.outbound)
+	<-writerDone
 
 	if c.OnClose != nil {
 		c.OnClose(c.ID, loopErr)
