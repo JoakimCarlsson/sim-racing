@@ -173,8 +173,8 @@ async function main(): Promise<void> {
     function animate(): void {
       requestAnimationFrame(animate);
 
-      // Bind cube transform to predicted physics state.
-      const ps = predictor.predictedState;
+      // Bind cube transform to render state (predicted + visual smoothing offset).
+      const ps = predictor.renderState;
       _pos.set(ps.position[0], ps.position[1], ps.position[2]);
 
       // Clamp y so the cube never sinks below the ground plane.
