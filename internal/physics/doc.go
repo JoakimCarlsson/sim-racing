@@ -22,7 +22,19 @@
 //
 // # Coordinate system
 //
-// Right-handed, Y up, Z forward (into screen / toward track ahead):
+// Two frames are used; fields are labelled accordingly in State:
+//
+// World frame (inertial, fixed to the track):
+//   - State.Position is in world frame (metres from track origin).
+//   - State.Orientation is a unit quaternion [x, y, z, w] rotating from body
+//     frame to world frame.
+//
+// Body frame (vehicle-space, attached to and moving with the car):
+//   - State.LinearVel is in body frame: X right, Y up, Z forward (m/s).
+//   - State.AngularVel is in body frame: X pitch, Y yaw, Z roll (rad/s).
+//
+// Both frames are right-handed, Y up, Z forward when the vehicle faces its
+// default heading:
 //
 //	+Y  up
 //	|
@@ -30,7 +42,9 @@
 //	/
 //	+Z  forward (into the track)
 //
-// Orientation is represented as a quaternion [x, y, z, w] in that field order.
+// Step integrates LinearVel in body frame, then rotates the displacement into
+// world frame to advance Position. Orientation is integrated via quaternion
+// derivative from AngularVel each tick and renormalised to prevent drift.
 //
 // # float32 rationale
 //
