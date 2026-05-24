@@ -35,6 +35,7 @@ type SpawnPoint struct {
 }
 
 // Track is the canonical in-memory representation of a track.json document.
+// Heights is optional; it is nil when no .height.bin has been loaded.
 type Track struct {
 	ID            string
 	Name          string
@@ -42,6 +43,7 @@ type Track struct {
 	StartFinish   Plane
 	Sectors       []Plane
 	LimitsPolygon Polygon2D
+	Heights       *Heightmap
 }
 
 // Validate returns a descriptive error if the track is invalid, or nil.
