@@ -145,6 +145,62 @@ violate any of them:
 > Note: the `assets/` and `web/public/` copies are kept in sync manually.
 > No auto-sync tooling is provided at this milestone.
 
+## Heightmap (.height.bin)
+
+Each track directory may contain a `track.height.bin` file alongside
+`track.json`.  The heightmap is a regular-grid elevation map on the XZ
+plane, used by the server for terrain queries.  It is generated offline by
+`cmd/bake-track` and is **optional** at runtime — the server logs a warning
+and continues if the file is absent.
+
+### Binary layout
+
+All fields are **little-endian**.
+
+| Offset | Size | Type | Field | Value |
+|--------|------|------|-------|-------|
+| 0 | 4 | bytes | magic | `SRHM` |
+| 4 | 2 | uint16 | version | `1` |
+| 6 | 2 | uint16 | reserved | `0` |
+| 8 | 4 | float32 | originX | world X of cell (0,0) |
+| 12 | 4 | float32 | originZ | world Z of cell (0,0) |
+| 16 | 4 | float32 | cellSize | metres per cell edge |
+| 20 | 4 | uint32 | width | columns (X-dimension) |
+| 24 | 4 | uint32 | depth | rows (Z-dimension) |
+| 28 | W×D×4 | float32[] | heights | row-major heights |
+| 28+W×D×4 | 3×W×D×4 | float32[] | normals | packed XYZ normals, row-major |
+
+- **magic** must be exactly `SRHM`; files with any other magic are rejected.
+- **version** must be `1`; other values are rejected.
+- **cellSize** and both dimensions must be positive; zero or negative values are rejected.
+- Heights and normals are stored **row-major** with Z as the outer dimension:
+  index = row × width + col, where col ∈ [0, width) maps to X and
+  row ∈ [0, depth) maps to Z.
+- Normals are packed XYZ triples: `normals[3×i]`, `normals[3×i+1]`,
+  `normals[3×i+2]` for the i-th grid point.
+
+### Grid boundary
+
+The grid covers:
+
+- X ∈ `[originX, originX + (width-1) × cellSize]`
+- Z ∈ `[originZ, originZ + (depth-1) × cellSize]`
+
+Queries outside this rectangle return `ok=false`.
+
+### Generating a heightmap
+
+```bash
+go run ./cmd/bake-track \
+  --in  assets/tracks/circuit01/track.gltf \
+  --out assets/tracks/circuit01/track.height.bin \
+  --cell-size 0.5 \
+  --pad 5.0
+```
+
+For a flat glTF (Y=0 everywhere) this emits a constant-height grid with
+normals `[0,1,0]`.
+
 ## Example: circuit01
 
 ```json
