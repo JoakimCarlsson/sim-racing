@@ -21,16 +21,14 @@ export class Socket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(url?: string) {
-    this.url =
-      url ?? `ws://${location.hostname}:8080/ws`;
+    this.url = url ?? `ws://${location.hostname}:8080/ws`;
   }
 
   /** Open the WebSocket connection. Safe to call multiple times. */
   connect(): void {
     if (
       this.ws !== null &&
-      (this.ws.readyState === WebSocket.OPEN ||
-        this.ws.readyState === WebSocket.CONNECTING)
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
     ) {
       return;
     }
@@ -39,7 +37,7 @@ export class Socket {
     this.ws = ws;
 
     ws.onopen = () => {
-      console.log("WS connected");
+      console.log('WS connected');
       this.attempt = 0;
       // Flush queued messages.
       for (const msg of this.queue) {
@@ -56,13 +54,13 @@ export class Socket {
     };
 
     ws.onclose = () => {
-      console.log("WS disconnected");
+      console.log('WS disconnected');
       this.ws = null;
       this.scheduleReconnect();
     };
 
     ws.onerror = (ev) => {
-      console.error("WS error", ev);
+      console.error('WS error', ev);
     };
   }
 

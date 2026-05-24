@@ -8,17 +8,17 @@ import {
   PlaneGeometry,
   Scene,
   WebGLRenderer,
-} from "three";
-import { Socket } from "./net/socket";
+} from 'three';
+import { Socket } from './net/socket';
 
 // --- WebSocket echo loop ---
 // Initialised first so a WebGL failure cannot prevent WS from connecting.
 // send("hello") before connect() queues the message; Socket.onopen flushes it.
 const sock = new Socket();
 sock.onMessage((data) => {
-  console.log("received:", data);
+  console.log('received:', data);
 });
-sock.send("hello");
+sock.send('hello');
 sock.connect();
 
 // --- Three.js renderer (wrapped so a headless/GPU failure is non-fatal) ---
@@ -28,12 +28,7 @@ try {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const camera = new PerspectiveCamera(
-    60,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    100,
-  );
+  const camera = new PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
   camera.position.set(0, 3, 6);
   camera.lookAt(0, 0.5, 0);
 
@@ -64,7 +59,7 @@ try {
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  window.addEventListener("resize", onResize);
+  window.addEventListener('resize', onResize);
 
   function animate(): void {
     requestAnimationFrame(animate);
@@ -75,5 +70,5 @@ try {
 
   animate();
 } catch (err) {
-  console.warn("WebGL unavailable — 3-D rendering disabled:", err);
+  console.warn('WebGL unavailable — 3-D rendering disabled:', err);
 }

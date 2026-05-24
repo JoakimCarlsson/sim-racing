@@ -14,7 +14,10 @@ import (
 
 // upgradeAndServe is a minimal test handler: it accepts the WS connection,
 // wraps it in a Conn, and calls Serve. It is used only in tests.
-func upgradeAndServe(t *testing.T, openCount, closeCount *atomic.Int64) http.HandlerFunc {
+func upgradeAndServe(
+	t *testing.T,
+	openCount, closeCount *atomic.Int64,
+) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
