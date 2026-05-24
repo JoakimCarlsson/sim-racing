@@ -1,0 +1,33 @@
+# Binaries
+/sim-racing
+/sim-racing.exe
+*.exe
+*.out
+
+# Go build cache
+/dist/
+
+# Environment
+.env
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Frontend build output
+web/dist/
+web/node_modules/
+web/public/physics.wasm
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+
+# OS
+Thumbs.db
