@@ -403,3 +403,330 @@ func TestConnServe_RingOverflow(t *testing.T) {
 	}
 
 }
+
+// ---- SendSnapshot tests (AC2 from the snapshot broadcaster issue) -----------
+
+// TestSendSnapshotCopiesPayload verifies that SendSnapshot copies the payload
+// so that the caller can freely mutate the original slice after the call.
+func TestSendSnapshotCopiesPayload(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		srvConn  *realtime.Conn
+		closedWg sync.WaitGroup
+	)
+	closedWg.Add(1)
+
+	// Track payloads received by the client.
+	var received [][]byte
+	var recvMu sync.Mutex
+
+	srv := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: []string{"*"},
+			})
+			if err != nil {
+				t.Errorf("accept: %v", err)
+				return
+			}
+			c := &realtime.Conn{
+				ID: 1,
+				WS: ws,
+			}
+			mu.Lock()
+			srvConn = c
+			mu.Unlock()
+			_ = c.Serve(r.Context())
+			closedWg.Done()
+		}),
+	)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	ctx := context.Background()
+	client, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	// Read frames from the client in the background.
+	var readWg sync.WaitGroup
+	readWg.Add(1)
+	go func() {
+		defer readWg.Done()
+		for {
+			_, data, err := client.Read(ctx)
+			if err != nil {
+				return
+			}
+			cp := make([]byte, len(data))
+			copy(cp, data)
+			recvMu.Lock()
+			received = append(received, cp)
+			recvMu.Unlock()
+		}
+	}()
+
+	// Wait for server conn to be assigned.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		c := srvConn
+		mu.Unlock()
+		if c != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	c := srvConn
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("srvConn never set")
+	}
+
+	// Send a snapshot payload; then immediately mutate the original slice.
+	payload := []byte{
+		0x02,
+		0x01,
+		0xAA,
+		0xBB,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x01,
+	}
+	original := make([]byte, len(payload))
+	copy(original, payload)
+	c.SendSnapshot(payload, 0)
+
+	// Mutate payload after SendSnapshot returns.
+	for i := range payload {
+		payload[i] = 0xFF
+	}
+
+	// Give the writer goroutine time to deliver the frame.
+	time.Sleep(100 * time.Millisecond)
+
+	client.Close(websocket.StatusNormalClosure, "done")
+	closedWg.Wait()
+	readWg.Wait()
+
+	recvMu.Lock()
+	defer recvMu.Unlock()
+	if len(received) == 0 {
+		t.Fatal("client received no frames")
+	}
+	// The received frame must match the original payload (not the mutated 0xFF bytes).
+	got := received[0]
+	if len(got) != len(original) {
+		t.Fatalf("received frame length %d, want %d", len(got), len(original))
+	}
+	for i, b := range original {
+		if got[i] != b {
+			t.Errorf(
+				"received[0][%d] = 0x%02x, want 0x%02x (payload was copied)",
+				i,
+				got[i],
+				b,
+			)
+		}
+	}
+}
+
+// TestSendSnapshotDropsWhenFull verifies that SendSnapshot returns immediately
+// and increments DropCount when the outbound buffer (capacity 4) is full,
+// rather than blocking.
+func TestSendSnapshotDropsWhenFull(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		srvConn  *realtime.Conn
+		closedWg sync.WaitGroup
+	)
+	closedWg.Add(1)
+
+	srv := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: []string{"*"},
+			})
+			if err != nil {
+				t.Errorf("accept: %v", err)
+				return
+			}
+			c := &realtime.Conn{
+				ID: 1,
+				WS: ws,
+			}
+			mu.Lock()
+			srvConn = c
+			mu.Unlock()
+			_ = c.Serve(r.Context())
+			closedWg.Done()
+		}),
+	)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	ctx := context.Background()
+	client, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	// Wait for server conn.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		c := srvConn
+		mu.Unlock()
+		if c != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	c := srvConn
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("srvConn never set")
+	}
+
+	// Send many frames rapidly without giving the writer goroutine time to
+	// drain them. The outbound channel has capacity 4, so frames 5+ must drop.
+	payload := []byte{
+		0x02,
+		0x01,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+	}
+	const sends = 20
+	for i := 0; i < sends; i++ {
+		start := time.Now()
+		c.SendSnapshot(payload, 0)
+		elapsed := time.Since(start)
+		// Each call must return essentially immediately (non-blocking).
+		if elapsed > 50*time.Millisecond {
+			t.Errorf(
+				"SendSnapshot[%d] blocked for %s; expected <50ms",
+				i,
+				elapsed,
+			)
+		}
+	}
+
+	drops := c.DropCount()
+	t.Logf("sends=%d drops=%d", sends, drops)
+	if drops == 0 {
+		t.Error(
+			"expected at least one drop when outbound buffer is full, got 0",
+		)
+	}
+
+	client.Close(websocket.StatusNormalClosure, "done")
+	closedWg.Wait()
+}
+
+// TestSendSnapshotAfterCloseDoesNotPanic is a regression test for the race
+// condition where a broadcaster goroutine calls SendSnapshot on a Conn whose
+// Serve teardown has already closed the outbound channel.
+//
+// The test connects a real WebSocket, lets Serve start (so the outbound channel
+// is initialised and the closed flag is false), closes the client to trigger
+// Serve's teardown path, then hammers SendSnapshot from many goroutines.
+// No panic must occur; DropCount may or may not increment.
+func TestSendSnapshotAfterCloseDoesNotPanic(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		srvConn  *realtime.Conn
+		closedWg sync.WaitGroup
+	)
+	closedWg.Add(1)
+
+	srv := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				OriginPatterns: []string{"*"},
+			})
+			if err != nil {
+				t.Errorf("accept: %v", err)
+				return
+			}
+			c := &realtime.Conn{
+				ID: 1,
+				WS: ws,
+			}
+			mu.Lock()
+			srvConn = c
+			mu.Unlock()
+			_ = c.Serve(r.Context())
+			closedWg.Done()
+		}),
+	)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	ctx := context.Background()
+	client, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	// Wait until the server Conn is available (Serve has started and outbound
+	// channel is initialised).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		c := srvConn
+		mu.Unlock()
+		if c != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	c := srvConn
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("srvConn never set")
+	}
+
+	// Close the client to trigger Serve's teardown (sets closed flag, closes
+	// outbound channel).
+	client.Close(websocket.StatusNormalClosure, "done")
+	closedWg.Wait()
+
+	// Now hammer SendSnapshot from many goroutines concurrently.  Any panic
+	// here would be caught by the test runtime and fail the test.
+	const goroutines = 50
+	const sendsPerGoroutine = 100
+	payload := []byte{0x02, 0x01, 0x00, 0x00}
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < sendsPerGoroutine; j++ {
+				c.SendSnapshot(payload, 0)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// If we reach here without a panic, the race condition guard is working.
+	t.Logf(
+		"completed %d concurrent SendSnapshot calls after close without panic",
+		goroutines*sendsPerGoroutine,
+	)
+}

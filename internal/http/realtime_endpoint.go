@@ -49,6 +49,7 @@ func registerRealtime(r *router.Router, deps Deps) {
 				p := &sim.PlayerSim{
 					ID:     playerID,
 					Source: conn,
+					Sink:   conn,
 					State: physics.State{
 						// Identity quaternion: x=0 y=0 z=0 w=1
 						Orientation: [4]float32{0, 0, 0, 1},

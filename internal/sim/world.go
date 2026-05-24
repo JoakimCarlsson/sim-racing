@@ -20,6 +20,7 @@ type InputSource interface {
 type PlayerSim struct {
 	ID             PlayerID
 	Source         InputSource
+	Sink           SnapshotSink
 	State          physics.State
 	Constants      physics.Constants
 	LastAppliedSeq uint32
@@ -32,6 +33,10 @@ type World struct {
 	players          map[PlayerID]*PlayerSim
 	TickHz           int
 	MaxInputsPerTick int
+	// bcastBuf is the broadcaster's pre-allocated scratch space, owned
+	// exclusively by RunBroadcaster / broadcastOnce and never accessed from
+	// other goroutines.
+	bcastBuf broadcastBufT
 }
 
 // Snapshot is an immutable copy of a PlayerSim used for broadcasting.
@@ -46,6 +51,10 @@ func New() *World {
 		players:          make(map[PlayerID]*PlayerSim),
 		TickHz:           60,
 		MaxInputsPerTick: 16,
+		bcastBuf: broadcastBufT{
+			wire:  make([]byte, 0, 1024),
+			views: make([]snapshotView, 0, 16),
+		},
 	}
 }
 
