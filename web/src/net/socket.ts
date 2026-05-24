@@ -4,19 +4,28 @@
  * Usage:
  *   const sock = new Socket();
  *   sock.onMessage((data) => console.log(data));
+ *   sock.onBinaryMessage((buf) => handleBinary(buf));
+ *   sock.onOpen(() => sender.start());
+ *   sock.onClose(() => sender.stop());
  *   sock.connect();
  *   sock.send("hello");
+ *   sock.sendBinary(new Uint8Array([1,2,3]));
  */
 
 const BACKOFF_MS = [500, 1000, 2000, 4000, 5000];
 
 type MessageCallback = (data: string) => void;
+type BinaryCallback = (data: ArrayBuffer) => void;
+type HookCallback = () => void;
 
 export class Socket {
   private readonly url: string;
   private ws: WebSocket | null = null;
   private queue: string[] = [];
   private subscribers: MessageCallback[] = [];
+  private binarySubscribers: BinaryCallback[] = [];
+  private openHooks: HookCallback[] = [];
+  private closeHooks: HookCallback[] = [];
   private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -34,28 +43,42 @@ export class Socket {
     }
 
     const ws = new WebSocket(this.url);
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
     ws.onopen = () => {
       console.log('WS connected');
       this.attempt = 0;
-      // Flush queued messages.
+      // Flush queued text messages.
       for (const msg of this.queue) {
         ws.send(msg);
       }
       this.queue = [];
+      for (const cb of this.openHooks) {
+        cb();
+      }
     };
 
-    ws.onmessage = (ev: MessageEvent<string>) => {
-      console.log(`echo: ${ev.data}`);
-      for (const cb of this.subscribers) {
-        cb(ev.data);
+    ws.onmessage = (ev: MessageEvent) => {
+      if (ev.data instanceof ArrayBuffer) {
+        for (const cb of this.binarySubscribers) {
+          cb(ev.data);
+        }
+      } else {
+        const text = ev.data as string;
+        console.log(`echo: ${text}`);
+        for (const cb of this.subscribers) {
+          cb(text);
+        }
       }
     };
 
     ws.onclose = () => {
       console.log('WS disconnected');
       this.ws = null;
+      for (const cb of this.closeHooks) {
+        cb();
+      }
       this.scheduleReconnect();
     };
 
@@ -73,9 +96,41 @@ export class Socket {
     }
   }
 
-  /** Register a subscriber that is called for every received message. */
+  /**
+   * Send a binary frame. Returns true if the socket was open and the
+   * frame was handed to the WS layer; false otherwise (frame dropped).
+   */
+  sendBinary(data: Uint8Array): boolean {
+    if (this.ws !== null && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+      return true;
+    }
+    return false;
+  }
+
+  /** Returns true when the underlying WebSocket is in the OPEN state. */
+  isOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /** Register a subscriber for text messages. */
   onMessage(cb: MessageCallback): void {
     this.subscribers.push(cb);
+  }
+
+  /** Register a subscriber for binary (ArrayBuffer) messages. */
+  onBinaryMessage(cb: BinaryCallback): void {
+    this.binarySubscribers.push(cb);
+  }
+
+  /** Register a hook called every time the connection opens. */
+  onOpen(cb: HookCallback): void {
+    this.openHooks.push(cb);
+  }
+
+  /** Register a hook called every time the connection closes. */
+  onClose(cb: HookCallback): void {
+    this.closeHooks.push(cb);
   }
 
   private scheduleReconnect(): void {

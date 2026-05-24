@@ -10,14 +10,32 @@ import {
   WebGLRenderer,
 } from 'three';
 import { Socket } from './net/socket';
+import { KeyboardSource } from './input/keyboard';
+import { InputSampler } from './input/sampler';
+import { InputSender } from './net/inputSender';
 
-// --- WebSocket echo loop ---
+// --- WebSocket + input pipeline ---
 // Initialised first so a WebGL failure cannot prevent WS from connecting.
-// send("hello") before connect() queues the message; Socket.onopen flushes it.
 const sock = new Socket();
+
+const keyboard = new KeyboardSource();
+const sampler = new InputSampler(keyboard);
+const sender = new InputSender(sampler, sock);
+
+// Start/stop the 60 Hz send loop in response to connection lifecycle.
+sock.onOpen(() => {
+  sampler.reset();
+  sender.start();
+});
+sock.onClose(() => {
+  sender.stop();
+});
+
 sock.onMessage((data) => {
   console.log('received:', data);
 });
+
+// Existing text-echo preserved (non-goal: do not remove)
 sock.send('hello');
 sock.connect();
 
