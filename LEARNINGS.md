@@ -10,3 +10,4 @@ When an entry below appears 2+ times, promote it to `AGENTS.md` (or the relevant
 
 <!-- Format: `- YYYY-MM-DD #<PR>: <one short sentence>` -->
 <!-- Reviewer appends here. Most recent at the bottom. -->- 2026-05-24 #52: Bootstrap PRs with no CI workflows will show 'no checks reported' — reviewer should proceed when zero workflows exist rather than waiting indefinitely; add a GitHub Actions CI workflow (go build/vet/test) as the very next scaffolding issue.
+- 2026-05-24 #53: Frontend-only PRs with no HTTP routes have no E2E curl requirement; the HANDOFF:VERIFIED schema's verification[] browser-smoke entry is still required — smoke-tester should note canvas injection and console-errors count even when Playwright is unavailable.
