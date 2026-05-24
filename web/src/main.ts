@@ -9,6 +9,7 @@ import {
   Scene,
   WebGLRenderer,
 } from "three";
+import { Socket } from "./net/socket";
 
 const renderer = new WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -61,3 +62,12 @@ function animate(): void {
 }
 
 animate();
+
+// --- WebSocket echo loop ---
+// send("hello") before connect() queues the message; Socket.onopen flushes it.
+const sock = new Socket();
+sock.onMessage((data) => {
+  console.log("received:", data);
+});
+sock.send("hello");
+sock.connect();
