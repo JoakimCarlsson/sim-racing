@@ -11,7 +11,7 @@ GO_PKG_DIRS := $(shell go list -f '{{.Dir}}' ./...)
         frontend frontend-typecheck frontend-fmt frontend-lint \
         wasm parity \
         web-install web-fmt web-lint web-typecheck web-build \
-        fmt lint dev ci help install
+        fmt lint dev dev-laggy ci help install
 
 # ---------------------------------------------------------------------------
 # Backend
@@ -88,6 +88,11 @@ lint: backend-lint frontend-lint
 dev:
 	@echo "Starting server and frontend dev server in parallel…"
 	go run ./cmd/server & cd web && bun run dev
+
+## dev-laggy: run server + laggy WS proxy + frontend dev server (simulated latency/jitter/loss)
+dev-laggy:
+	@echo "Starting server, laggy proxy, and frontend dev server (DEV ONLY)…"
+	go run ./cmd/server & go run ./cmd/laggy & cd web && VITE_SERVER_WS_URL=ws://localhost:9090/ws bun run dev
 
 ## ci: full gate — vet, test, lint, typecheck, build, wasm, parity
 ci: backend-vet backend-test backend-lint frontend-typecheck frontend-lint frontend wasm parity
