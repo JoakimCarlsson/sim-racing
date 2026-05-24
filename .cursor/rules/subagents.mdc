@@ -1,0 +1,59 @@
+---
+description: How to use bastion subagents, HANDOFF blocks, and gh CLI in Agent mode
+alwaysApply: true
+---
+
+# Subagents and workflow
+
+## Tools
+
+- **GitHub**: `gh` only (issues, labels, milestones, PRs) — not the web UI for bulk work
+- **Git**: local repo operations only
+- **PowerShell**: use `--body-file` for issue/PR bodies; no bash heredocs
+
+## Agents (invoke explicitly)
+
+| Agent | Slash | Role |
+|-------|-------|------|
+| issue-creator | `/issue-creator` | Issues, labels, milestones — **standalone**, stops when done |
+| planner | `/planner` | Pick issue, `gh issue develop` → linked `task/<N>-<slug>` branch, plan (no source edits) |
+| coder | `/coder` | Implement from `HANDOFF:PLAN` or `HANDOFF:FIX` |
+| smoke-tester | `/smoke-tester` | Build, test, HTTP smoke checks |
+| reviewer | `/reviewer` | Final review; **blocking issues → `HANDOFF:FIX` → coder**; on approval **commits, pushes, opens PR** |
+
+**Delivery pipeline:** `/planner` → `/coder` → `/smoke-tester` → `/reviewer`
+
+**Auto-handoff (required):** When a pipeline agent finishes with a `HANDOFF` block and `next_agent` set, **immediately** delegate to that agent via the **Task** tool. Pass the **full** `HANDOFF` block unchanged in the Task prompt. Do **not** stop and ask the user to run the next slash command or paste the handoff manually.
+
+| HANDOFF | Next agent |
+|---------|------------|
+| `HANDOFF:PLAN` | `coder` |
+| `HANDOFF:IMPLEMENTATION` | `smoke-tester` |
+| `HANDOFF:VERIFIED` | `reviewer` |
+| `HANDOFF:FIX` | `coder` (from smoke-tester **or reviewer**) |
+
+**issue-creator** is standalone — no auto-chain after it.
+
+## HANDOFF blocks
+
+Copy unchanged between agents:
+
+- `HANDOFF:PLAN` — planner → coder
+- `HANDOFF:IMPLEMENTATION` — coder → smoke-tester
+- `HANDOFF:VERIFIED` — smoke-tester → reviewer
+- `HANDOFF:FIX` — smoke-tester or reviewer → coder
+
+## Small tasks
+
+For typos or one-file fixes, skip planner and smoke-tester; use `/coder` then auto-handoff to `reviewer` with `HANDOFF:VERIFIED` or a minimal verification summary if smoke-tester was skipped.
+
+## Verification commands
+
+Before smoke-testing, read `.cursor/verify-commands.md`. Update that file when the project stack is chosen.
+
+## Commits
+
+Never add AI/Cursor `Co-authored-by` trailers.
+
+- **Pipeline delivery:** the **reviewer** always commits (if needed), pushes, and opens the PR after approval — do not leave that to the user.
+- **Outside the pipeline:** commit only when the user explicitly asks.
