@@ -139,6 +139,17 @@ type Constants struct {
 	// WeightDistributionFront is the fraction of total vehicle weight on the
 	// front axle (0-1). Default 0.5 = 50/50 split.
 	WeightDistributionFront float32 `json:"weightDistributionFront"`
+
+	// CGHeight is the height of the centre of mass above the ground plane (m).
+	// Used in longitudinal and lateral weight transfer calculations.
+	// Typical value for a sports car: 0.45-0.65 m.
+	CGHeight float32 `json:"cgHeight"`
+
+	// RollStiffnessFront is the fraction of total lateral load transfer reacted
+	// by the front axle, in the range [0, 1]. A value of 0.5 distributes the
+	// lateral transfer equally between front and rear; higher values make the
+	// car understeer more. Default 0.55 for a mild front-biased sports car.
+	RollStiffnessFront float32 `json:"rollStiffnessFront"`
 }
 
 // DefaultConstants provides a reasonable starting-point vehicle configuration
@@ -192,4 +203,12 @@ var DefaultConstants = Constants{
 
 	// 50/50 front/rear weight distribution.
 	WeightDistributionFront: 0.5,
+
+	// Centre-of-mass height: 0.55 m is a conservative value for a ~1200 kg
+	// sports car (typical range 0.45-0.65 m).
+	CGHeight: 0.55,
+
+	// Mild front-biased roll stiffness: 55 % of lateral load transfer is
+	// reacted by the front axle, giving a gentle understeer tendency.
+	RollStiffnessFront: 0.55,
 }

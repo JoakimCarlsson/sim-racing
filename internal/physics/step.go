@@ -126,14 +126,38 @@ func Step(s State, in Input, c Constants, dt float32) State {
 	if wdf <= 0 || wdf >= 1 {
 		wdf = 0.5
 	}
-	totalNormalForce := c.Mass * g
-	frontLoad := totalNormalForce * wdf
-	rearLoad := totalNormalForce * (1.0 - wdf)
 
+	// Centre-of-mass height (m); fall back to 0.55 m if unset.
+	cgH := c.CGHeight
+	if cgH <= 0 {
+		cgH = 0.55
+	}
+
+	// Roll-stiffness front fraction [0,1]; fall back to 0.55 if unset.
+	rsf := c.RollStiffnessFront
+	if rsf <= 0 || rsf >= 1 {
+		rsf = 0.55
+	}
+
+	// Aerodynamic downforce (N) at current speed; split by wdf.
+	downforce := float32(0)
+	if c.AirDensity > 0 && c.DownforceCoeff > 0 && c.FrontalArea > 0 {
+		downforce = 0.5 * c.AirDensity * c.DownforceCoeff * c.FrontalArea * vNew * vNew
+	}
+
+	// Total normal force and static per-axle loads (including downforce).
+	totalNormalForce := c.Mass*g + downforce
+	staticFront := totalNormalForce * wdf
+	staticRear := totalNormalForce * (1.0 - wdf)
+
+	// ---- Step 1: provisional ax from longitudinal dynamics ----
+	// ax is the longitudinal acceleration computed this tick (m/s²).
+	ax := accel // from netForce / c.Mass above
+
+	// ---- Step 2: provisional lateral force using static axle loads ----
 	// Yaw rate and sideslip angle from previous state.
 	yawRate := s.AngularVel[1]
 	// Sideslip angle: atan2(v_lat, v_long).
-	// Reconstruct from stored LinearVel (body frame).
 	vLat := s.LinearVel[0]
 	var beta float32
 	if vTotal >= vLongEps {
@@ -143,15 +167,76 @@ func Step(s State, in Input, c Constants, dt float32) State {
 	// Axle distances from CoM (50/50 => Lf = Lr = Wheelbase/2).
 	halfWB := c.Wheelbase / 2.0
 
+	var provisionalFyTotal float32
+	var alphaFront, alphaRear float32
+	if vTotal >= vLongEps {
+		alphaFront = steerAngle - beta - (halfWB*yawRate)/vTotal
+		alphaRear = -beta + (halfWB*yawRate)/vTotal
+
+		provisionalFront := pacejkaFy(
+			alphaFront, staticFront, c.PacejkaB, c.PacejkaC, c.PacejkaD,
+		)
+		provisionalRear := pacejkaFy(
+			alphaRear, staticRear, c.PacejkaB, c.PacejkaC, c.PacejkaD,
+		)
+		provisionalFyTotal = provisionalFront + provisionalRear
+	}
+
+	// ay from provisional lateral force (m/s²).
+	var ay float32
+	if c.Mass > 0 {
+		ay = provisionalFyTotal / c.Mass
+	}
+
+	// ---- Step 3: per-wheel load with weight transfer ----
+	//
+	// Longitudinal transfer (braking shifts forward, throttle shifts rearward):
+	//   dWlong = m * ax * h / L   (sign: ax > 0 = accelerating forward
+	//            → weight shifts rearward → front gets -dWlong)
+	//
+	// Lateral transfer per axle:
+	//   dWlat_total = m * ay * h / T
+	//   Front axle absorbs rsf fraction, rear axle (1-rsf).
+	//   ay > 0 here means turning left → centrifugal to the right
+	//   → right wheels gain load (outside of left turn).
+	var dWlong float32
+	if c.Wheelbase > 0 {
+		dWlong = c.Mass * ax * cgH / c.Wheelbase
+	}
+
+	var dWlatFront, dWlatRear float32
+	if c.TrackWidth > 0 {
+		dWlatTotal := c.Mass * ay * cgH / c.TrackWidth
+		dWlatFront = dWlatTotal * rsf
+		dWlatRear = dWlatTotal * (1.0 - rsf)
+	}
+
+	// Static per-wheel loads (front/rear split by wdf, left/right 50/50).
+	halfFront := staticFront * 0.5
+	halfRear := staticRear * 0.5
+
+	// Apply transfers: longitudinal shifts between axles; lateral shifts
+	// between sides (positive ay → left turn → load to right).
+	// FL=0, FR=1, RL=2, RR=3
+	next.WheelLoad[0] = halfFront - dWlong*0.5 - dWlatFront // FL
+	next.WheelLoad[1] = halfFront - dWlong*0.5 + dWlatFront // FR
+	next.WheelLoad[2] = halfRear + dWlong*0.5 - dWlatRear   // RL
+	next.WheelLoad[3] = halfRear + dWlong*0.5 + dWlatRear   // RR
+
+	// Clamp to zero (wheel lifts off; cannot push downward on ground).
+	for i := range next.WheelLoad {
+		if next.WheelLoad[i] < 0 {
+			next.WheelLoad[i] = 0
+		}
+	}
+
+	// ---- Step 4: per-axle dynamic loads for Pacejka ----
+	frontLoad := next.WheelLoad[0] + next.WheelLoad[1]
+	rearLoad := next.WheelLoad[2] + next.WheelLoad[3]
+
 	var Fy_front, Fy_rear float32
 	var nextYawRate float32
 	if vTotal >= vLongEps {
-		// Per-axle slip angles using sideslip angle + yaw rate.
-		// α_f = δ - β - (Lf * r) / v
-		// α_r =     -β + (Lr * r) / v
-		alphaFront := steerAngle - beta - (halfWB*yawRate)/vTotal
-		alphaRear := -beta + (halfWB*yawRate)/vTotal
-
 		Fy_front = pacejkaFy(
 			alphaFront,
 			frontLoad,
