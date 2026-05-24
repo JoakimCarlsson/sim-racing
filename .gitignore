@@ -20,6 +20,7 @@
 web/dist/
 web/node_modules/
 web/public/physics.wasm
+web/public/wasm_exec.js
 
 # SQLite database
 *.db

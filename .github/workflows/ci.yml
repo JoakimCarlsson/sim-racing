@@ -59,3 +59,26 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  wasm-parity:
+    name: WASM parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Build physics.wasm
+        run: bash scripts/build-wasm.sh
+
+      - name: Run WASM parity test
+        run: cd web && bun test src/physics/parity.test.ts
