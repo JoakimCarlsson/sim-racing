@@ -33,6 +33,9 @@ type World struct {
 	players          map[PlayerID]*PlayerSim
 	TickHz           int
 	MaxInputsPerTick int
+	// Ground is the GroundSampler used for per-wheel height queries in every
+	// physics tick. Defaults to physics.FlatGround(0) when nil.
+	Ground physics.GroundSampler
 	// bcastBuf is the broadcaster's pre-allocated scratch space, owned
 	// exclusively by RunBroadcaster / broadcastOnce and never accessed from
 	// other goroutines.
@@ -46,11 +49,14 @@ type Snapshot struct {
 }
 
 // New creates a World with default parameters (60 Hz, 16 inputs/tick).
+// Ground defaults to physics.FlatGround(0) — replace with a Heightmap adapter
+// after loading track assets.
 func New() *World {
 	return &World{
 		players:          make(map[PlayerID]*PlayerSim),
 		TickHz:           60,
 		MaxInputsPerTick: 16,
+		Ground:           physics.FlatGround(0),
 		bcastBuf: broadcastBufT{
 			wire:  make([]byte, 0, 1024),
 			views: make([]snapshotView, 0, 16),

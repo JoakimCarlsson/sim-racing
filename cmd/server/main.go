@@ -12,9 +12,16 @@ import (
 	"time"
 
 	httpx "github.com/JoakimCarlsson/sim-racing/internal/http"
+	"github.com/JoakimCarlsson/sim-racing/internal/physics"
 	"github.com/JoakimCarlsson/sim-racing/internal/sim"
 	"github.com/JoakimCarlsson/sim-racing/internal/track"
 )
+
+// Compile-time assertion: *track.Heightmap must satisfy physics.GroundSampler.
+// This is guaranteed by Heightmap.Sample having the identical signature:
+//
+//	func (h *Heightmap) Sample(x, z float32) (height float32, normal [3]float32, ok bool)
+var _ physics.GroundSampler = (*track.Heightmap)(nil)
 
 // snapshotHz is the rate at which the broadcaster sends snapshots to clients.
 const snapshotHz = 30
@@ -34,7 +41,7 @@ func main() {
 	if trackDir == "" {
 		trackDir = filepath.Join(".", "assets", "tracks", "circuit01")
 	}
-	loadTrack(trackDir)
+	loadTrack(trackDir, world)
 
 	// Run the authoritative tick loop until the process receives a termination
 	// signal.
@@ -61,8 +68,10 @@ func main() {
 }
 
 // loadTrack loads track.json and (optionally) track.height.bin from dir.
-// A missing .height.bin is a warning, not a fatal error.
-func loadTrack(dir string) {
+// When a heightmap is present it is wired into world.Ground so physics uses
+// real terrain elevations. A missing .height.bin is a warning, not a fatal
+// error — the world keeps its default FlatGround(0) sampler.
+func loadTrack(dir string, world *sim.World) {
 	jsonPath := filepath.Join(dir, "track.json")
 	tr, err := track.LoadFile(jsonPath)
 	if err != nil {
@@ -83,6 +92,8 @@ func loadTrack(dir string) {
 			hm.Depth,
 			hm.CellSize,
 		)
+		// Wire the heightmap into the sim world as the active GroundSampler.
+		world.Ground = hm
 	}
 
 	log.Printf(

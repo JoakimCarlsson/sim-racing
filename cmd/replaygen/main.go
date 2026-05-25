@@ -193,9 +193,23 @@ func writeFixture(path string, records []inputRecord) error {
 // SYNC NOTE: This function MUST remain byte-for-byte identical to
 // hashStateStream in internal/physics/replay_test.go. If you change field
 // order or serialisation here, update that file too (and vice versa).
+// suspEquilY computes the suspension-equilibrium CoM height (world Y) for c
+// on FlatGround(0). At this height vertAccel = 0 and the car is at rest.
+//
+//	Y_eq = cgH + restLen - mass*g / (4*k)
+func suspEquilY(c physics.Constants) float32 {
+	const g = float32(9.81)
+	k := c.SuspensionSpringK
+	if k <= 0 {
+		k = 40000
+	}
+	return c.CGHeight + c.SuspensionRestLength - c.Mass*g/(4*k)
+}
+
 func replayAndHash(records []inputRecord, dt float32, hz int) [32]byte {
 	c := physics.DefaultConstants
 	s := physics.State{
+		Position:    [3]float32{0, suspEquilY(c), 0},
 		Gear:        1,
 		Orientation: [4]float32{0, 0, 0, 1},
 	}
@@ -219,7 +233,7 @@ func replayAndHash(records []inputRecord, dt float32, hz int) [32]byte {
 			Gear:      r.Gear,
 			Handbrake: r.Handbrake != 0,
 		}
-		s = physics.Step(s, in, c, dt)
+		s = physics.Step(s, in, c, physics.FlatGround(0), dt)
 
 		// Sample every hz ticks (at ticks hz-1, 2*hz-1, … → 1 Hz sampling).
 		if (i+1)%hz == 0 {

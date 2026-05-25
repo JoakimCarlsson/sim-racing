@@ -40,6 +40,13 @@ type State struct {
 	// Grounded is a bitmask: bit 0=FL, 1=FR, 2=RL, 3=RR; set when the wheel
 	// is in contact with the track surface.
 	Grounded uint8 `json:"grounded"`
+	// SuspensionCompression is the current spring compression (positive = compressed)
+	// for each wheel in order [FL, FR, RL, RR] (m). Updated by Step using the
+	// GroundSampler. Zero when airborne.
+	SuspensionCompression [4]float32 `json:"suspensionCompression"`
+	// SuspensionVel is the rate of change of spring compression (m/s) for each
+	// wheel [FL, FR, RL, RR], used for damper force calculation.
+	SuspensionVel [4]float32 `json:"suspensionVel"`
 }
 
 // TorqueSample is a single (RPM, torque in N·m) point on the engine's
@@ -150,6 +157,22 @@ type Constants struct {
 	// lateral transfer equally between front and rear; higher values make the
 	// car understeer more. Default 0.55 for a mild front-biased sports car.
 	RollStiffnessFront float32 `json:"rollStiffnessFront"`
+
+	// --- Suspension fields ---
+
+	// SuspensionRestLength is the unloaded spring length (m). The suspension
+	// travel is measured as compression from this length. Default 0.3 m.
+	SuspensionRestLength float32 `json:"suspensionRestLength"`
+
+	// SuspensionSpringK is the spring stiffness coefficient (N/m). A stiffer
+	// spring keeps the car flatter under load but transmits more road noise.
+	// Default 40000 N/m (reasonably stiff sports car).
+	SuspensionSpringK float32 `json:"suspensionSpringK"`
+
+	// SuspensionDamperC is the damping coefficient (N·s/m). Critically damped
+	// at 2*sqrt(k*m/4) per corner; typical sports-car ratio is ~0.3-0.5 of
+	// critical. Default 3000 N·s/m.
+	SuspensionDamperC float32 `json:"suspensionDamperC"`
 }
 
 // DefaultConstants provides a reasonable starting-point vehicle configuration
@@ -211,4 +234,12 @@ var DefaultConstants = Constants{
 	// Mild front-biased roll stiffness: 55 % of lateral load transfer is
 	// reacted by the front axle, giving a gentle understeer tendency.
 	RollStiffnessFront: 0.55,
+
+	// Suspension: 40 kN/m springs, 3 kN·s/m dampers, 0.3 m rest length.
+	// Per-corner sprung mass ≈ 300 kg → natural freq ≈ 1.83 Hz (sporty).
+	// Critical damping per corner = 2*sqrt(40000*300) ≈ 6928 N·s/m;
+	// ratio ≈ 0.43 (lightly underdamped, settles quickly without oscillating).
+	SuspensionRestLength: 0.30,
+	SuspensionSpringK:    40000,
+	SuspensionDamperC:    3000,
 }

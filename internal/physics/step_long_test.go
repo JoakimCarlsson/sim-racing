@@ -18,6 +18,20 @@ const (
 	tickDT  = 1.0 / tickHz
 )
 
+// suspGroundY is the equilibrium CoM height (world Y) for DefaultConstants on
+// FlatGround(0). At this height the spring force per corner equals mg/4, so
+// vertAccel = 0 and the car neither rises nor falls.
+//
+//	Position[1]_eq = cgH + restLen - (mass*g) / (4*k)
+//	               = 0.55 + 0.30  - 1200*9.81 / (4*40000)
+//	               ≈ 0.776 m
+var suspGroundY = func() float32 {
+	c := physics.DefaultConstants
+	const g = float32(9.81)
+	return c.CGHeight + c.SuspensionRestLength -
+		c.Mass*g/(4*c.SuspensionSpringK)
+}()
+
 // autoShift returns the recommended gear based on RPM thresholds, simulating a
 // simple driver model. It only shifts up and never below 1.
 func autoShift(currentGear int8, rpm float32, maxGears int) int8 {
@@ -36,7 +50,10 @@ func TestLongitudinal_ZeroToHundred(t *testing.T) {
 		len(c.GearRatios) - 2,
 	) // highest forward gear index in Input.Gear terms
 
-	s := physics.State{Gear: 1}
+	s := physics.State{
+		Position: [3]float32{0, suspGroundY, 0},
+		Gear:     1,
+	}
 	in := physics.Input{
 		Throttle: 1.0,
 		Brake:    0.0,
@@ -51,7 +68,7 @@ func TestLongitudinal_ZeroToHundred(t *testing.T) {
 	for i := 0; i < maxTicks; i++ {
 		// Shift up when RPM exceeds 6500.
 		in.Gear = autoShift(in.Gear, s.RPM, int(maxForwardGear))
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 		if elapsed == 0 && s.LinearVel[2] >= target {
 			elapsed = float64(i+1) * tickDT
 		}
@@ -75,7 +92,10 @@ func TestLongitudinal_TopSpeed(t *testing.T) {
 	c := physics.DefaultConstants
 	maxForwardGear := int8(len(c.GearRatios) - 2)
 
-	s := physics.State{Gear: 1}
+	s := physics.State{
+		Position: [3]float32{0, suspGroundY, 0},
+		Gear:     1,
+	}
 	in := physics.Input{
 		Throttle: 1.0,
 		Brake:    0.0,
@@ -85,7 +105,7 @@ func TestLongitudinal_TopSpeed(t *testing.T) {
 	maxTicks := int(90.0 * tickHz)
 	for i := 0; i < maxTicks; i++ {
 		in.Gear = autoShift(in.Gear, s.RPM, int(maxForwardGear))
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 	}
 
 	finalKmh := s.LinearVel[2] * 3.6
@@ -105,6 +125,7 @@ func TestLongitudinal_BrakingDistance(t *testing.T) {
 
 	// Seed: car moving at 100 km/h forward.
 	s := physics.State{
+		Position:  [3]float32{0, suspGroundY, 0},
 		LinearVel: [3]float32{0, 0, float32(100 * kmhToMs)},
 		Gear:      1,
 		RPM:       float32(c.IdleRPM),
@@ -121,7 +142,7 @@ func TestLongitudinal_BrakingDistance(t *testing.T) {
 	stopped := false
 	for i := 0; i < maxTicks; i++ {
 		distM += s.LinearVel[2] * tickDT
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 		if s.LinearVel[2] <= 0.1 {
 			stopped = true
 			break
@@ -149,7 +170,10 @@ func TestLongitudinal_BrakingDistance(t *testing.T) {
 // full throttle results in a negative (backward) forward velocity (AC2).
 func TestLongitudinal_Reverse(t *testing.T) {
 	c := physics.DefaultConstants
-	s := physics.State{Gear: -1}
+	s := physics.State{
+		Position: [3]float32{0, suspGroundY, 0},
+		Gear:     -1,
+	}
 	in := physics.Input{
 		Throttle: 1.0,
 		Brake:    0.0,
@@ -157,7 +181,7 @@ func TestLongitudinal_Reverse(t *testing.T) {
 	}
 
 	for i := 0; i < int(5*tickHz); i++ {
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 	}
 
 	if s.LinearVel[2] >= 0 {

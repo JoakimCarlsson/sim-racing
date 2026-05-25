@@ -12,6 +12,15 @@
 //     Fills constsBuf with the DefaultConstants encoding so the JS caller
 //     does not need to hard-code values.
 //
+//   - initialState() Uint8Array
+//     Returns a 96-byte stateBuf pre-populated with the canonical starting
+//     state used by both cmd/replaygen and internal/physics/replay_test.go:
+//     Position = [0, suspEquilY, 0], Orientation = [0,0,0,1], Gear = 1,
+//     all other fields zero. suspEquilY is the suspension-equilibrium CoM
+//     height on FlatGround(0) so that the car neither rises nor falls at
+//     t=0. This is the ONLY correct initial state for the Go↔WASM parity
+//     test; callers MUST use this instead of constructing the buffer manually.
+//
 // # Buffer layouts (all values little-endian unless noted)
 //
 // stateBuf (96 bytes):
@@ -57,6 +66,7 @@ func main() {
 
 	obj.Set("step", js.FuncOf(jsStep))
 	obj.Set("defaultConstants", js.FuncOf(jsDefaultConstants))
+	obj.Set("initialState", js.FuncOf(jsInitialState))
 
 	js.Global().Set("simPhysics", obj)
 
@@ -77,10 +87,46 @@ func jsStep(_ js.Value, args []js.Value) any {
 	s := decodeState(stateBuf)
 	in := decodeInput(inputBuf)
 
-	next := physics.Step(s, in, physics.DefaultConstants, dt)
+	next := physics.Step(s, in, physics.DefaultConstants, physics.FlatGround(0), dt)
 
 	out := make([]byte, 96)
 	encodeState(out, next)
+	return uint8ArrayFromBytes(out)
+}
+
+// suspEquilY returns the suspension-equilibrium CoM height (world Y) for
+// DefaultConstants on FlatGround(0). At this height vertAccel = 0 and the
+// car neither rises nor falls.
+//
+//	Y_eq = cgH + restLen - mass*g / (4*k)
+//
+// SYNC NOTE: This formula is identical to suspEquilY in cmd/replaygen/main.go
+// and the suspGroundY var in internal/physics/step_long_test.go.
+func suspEquilY() float32 {
+	c := physics.DefaultConstants
+	const g = float32(9.81)
+	return c.CGHeight + c.SuspensionRestLength - c.Mass*g/(4*c.SuspensionSpringK)
+}
+
+// jsInitialState implements globalThis.simPhysics.initialState().
+// Returns a 96-byte Uint8Array with the canonical starting state:
+//
+//	Position    = [0, suspEquilY, 0]
+//	Orientation = [0, 0, 0, 1]  (identity quaternion)
+//	Gear        = 1
+//	All other fields zero.
+//
+// This matches the initial state used by cmd/replaygen and
+// internal/physics/replay_test.go; the parity test MUST call this
+// instead of constructing its own buffer.
+func jsInitialState(_ js.Value, _ []js.Value) any {
+	s := physics.State{
+		Position:    [3]float32{0, suspEquilY(), 0},
+		Orientation: [4]float32{0, 0, 0, 1},
+		Gear:        1,
+	}
+	out := make([]byte, 96)
+	encodeState(out, s)
 	return uint8ArrayFromBytes(out)
 }
 

@@ -64,6 +64,8 @@ interface SimPhysics {
     dt: number,
   ): Uint8Array;
   defaultConstants(constsBuf?: Uint8Array): Uint8Array;
+  /** Returns the canonical 96-byte initial state buffer (Position[1]=suspEquilY, Gear=1, identity quaternion). */
+  initialState(): Uint8Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,20 +160,10 @@ function loadFixture(binPath: string): InputRecord[] {
 // Buffer helpers (mirrors decodeState / encodeInput in cmd/physicswasm)
 // ---------------------------------------------------------------------------
 
-/** Create initial state buffer: gear=1, orientation=[0,0,0,1], rest zero. */
-function initialStateBuf(): Uint8Array {
-  const buf = new Uint8Array(96);
-  const view = new DataView(buf.buffer);
-  // Position = [0,0,0] (already zero)
-  // Orientation = [0,0,0,1] at offsets 12,16,20,24
-  view.setFloat32(12, 0, true); // qx
-  view.setFloat32(16, 0, true); // qy
-  view.setFloat32(20, 0, true); // qz
-  view.setFloat32(24, 1, true); // qw
-  // RPM = 0 (already zero — will be clamped to idleRPM by Step)
-  view.setUint8(56, 1); // Gear = 1
-  return buf;
-}
+// initialStateBuf is intentionally removed — use simPhysics.initialState()
+// which returns the canonical starting state with the correct suspension-
+// equilibrium Position[1] (suspEquilY). Hard-coding Position[1]=0 diverges
+// from cmd/replaygen and internal/physics/replay_test.go.
 
 /** Encode one InputRecord into a 20-byte inputBuf. */
 function encodeInput(r: InputRecord, seq: number): Uint8Array {
@@ -203,7 +195,9 @@ function hashStateStream(
   physics: SimPhysics,
 ): string {
   const hash = createHash('sha256');
-  let stateBuf = initialStateBuf();
+  // Use the WASM-exported initial state so that Position[1] = suspEquilY,
+  // matching cmd/replaygen and internal/physics/replay_test.go exactly.
+  let stateBuf = physics.initialState();
 
   const scratch = new Uint8Array(4);
   const scratchView = new DataView(scratch.buffer);

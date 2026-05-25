@@ -3,7 +3,8 @@ package physics
 import "math"
 
 // Step advances the vehicle simulation by dt seconds given the current State s,
-// driver Input in, and vehicle Constants c.
+// driver Input in, vehicle Constants c, and a GroundSampler that reports
+// terrain height and normal at any world-space (x, z) position.
 //
 // The function is pure: it has no side effects and produces the same output for
 // identical inputs on every platform (determinism contract). Do not add I/O,
@@ -23,7 +24,19 @@ import "math"
 //	AngularVel[2] = roll
 //
 // Position and Orientation are in world frame.
-func Step(s State, in Input, c Constants, dt float32) State {
+//
+// When sampler is nil, FlatGround(0) is used as a fallback so callers that
+// have not yet wired a sampler continue to work correctly.
+func Step(
+	s State,
+	in Input,
+	c Constants,
+	sampler GroundSampler,
+	dt float32,
+) State {
+	if sampler == nil {
+		sampler = FlatGround(0)
+	}
 	next := s
 
 	// Commit the requested gear from the driver input.
@@ -188,7 +201,130 @@ func Step(s State, in Input, c Constants, dt float32) State {
 		ay = provisionalFyTotal / c.Mass
 	}
 
-	// ---- Step 3: per-wheel load with weight transfer ----
+	// ---- Step 3: per-wheel ground contact + suspension ----
+	//
+	// The GroundSampler determines per-wheel contact state and provides the
+	// terrain height needed for spring-compression calculation. The Grounded
+	// bitmask is populated here; WheelLoad still uses the static + weight-
+	// transfer model (preserved for backward compatibility and Pacejka inputs).
+	// Vertical body dynamics are driven by per-wheel spring/damper forces.
+	//
+	// Wheel contact-point XZ positions: CoM XZ + yaw-rotated body offsets.
+	// The wheel contact patch Y in world space ≈ CoM_Y - cgH (small pitch/roll
+	// approximation, consistent with the rest of this single-track model).
+	//
+	// Spring compression for wheel i:
+	//   c_i = restLength - (wheelBaseY - groundH_i)
+	// Ground contact iff c_i > 0.
+
+	halfWBSusp := c.Wheelbase / 2.0
+	halfTrack := c.TrackWidth / 2.0
+
+	// Suspension parameter defaults (fall back if unset in Constants).
+	springK := c.SuspensionSpringK
+	if springK <= 0 {
+		springK = 40000
+	}
+	damperC := c.SuspensionDamperC
+	if damperC <= 0 {
+		damperC = 3000
+	}
+	restLen := c.SuspensionRestLength
+	if restLen <= 0 {
+		restLen = 0.30
+	}
+
+	// Yaw-rotation helper for body-frame XZ → world-frame XZ.
+	// For a yaw-only quaternion [0, qy, 0, qw]:
+	//   sinYaw = 2*qw*qy,  cosYaw = 1 - 2*qy²
+	curQy := s.Orientation[1]
+	curQw := s.Orientation[3]
+	sinYaw := 2 * curQw * curQy
+	cosYaw := 1 - 2*curQy*curQy
+
+	rotXZ := func(bx, bz float32) (wx, wz float32) {
+		wx = cosYaw*bx - sinYaw*bz
+		wz = sinYaw*bx + cosYaw*bz
+		return
+	}
+
+	// Y coordinate of the wheel contact patches in world space.
+	wheelBaseY := s.Position[1] - cgH
+
+	// Body-frame XZ offsets per wheel (X=right, Z=forward in vehicle frame).
+	// Order: FL=0, FR=1, RL=2, RR=3.
+	type wOff struct{ bx, bz float32 }
+	offsets := [4]wOff{
+		{+halfTrack, +halfWBSusp}, // FL
+		{-halfTrack, +halfWBSusp}, // FR
+		{+halfTrack, -halfWBSusp}, // RL
+		{-halfTrack, -halfWBSusp}, // RR
+	}
+
+	// CoM vertical velocity in world space (≈ LinearVel[1] for small angles).
+	comVY := s.LinearVel[1]
+
+	// Net upward spring force across all grounded wheels (for vertical dynamics).
+	var totalSpringForceY float32
+
+	var nextGrounded uint8
+	for i, off := range offsets {
+		wx, wz := rotXZ(off.bx, off.bz)
+		wheelWX := s.Position[0] + wx
+		wheelWZ := s.Position[2] + wz
+
+		groundH, _, ok := sampler.Sample(wheelWX, wheelWZ)
+		if !ok {
+			// Outside sampler domain — no ground reference, treat as airborne.
+			next.SuspensionCompression[i] = 0
+			next.SuspensionVel[i] = 0
+			continue
+		}
+
+		// Spring compression = restLen - (wheelBaseY - groundH).
+		// Positive when the body is close enough to the ground for contact.
+		compression := restLen - (wheelBaseY - groundH)
+
+		if compression <= 0 {
+			// Wheel fully extended — airborne.
+			next.SuspensionCompression[i] = 0
+			next.SuspensionVel[i] = 0
+			continue
+		}
+
+		// Damper velocity = rate of change of compression.
+		// d(compression)/dt = -d(wheelBaseY)/dt = -comVY
+		compressionVel := -comVY
+
+		// Spring + damper force (N, upward on body). Clamped to >= 0.
+		springForce := springK*compression + damperC*compressionVel
+		if springForce < 0 {
+			springForce = 0
+		}
+
+		next.SuspensionCompression[i] = compression
+		next.SuspensionVel[i] = compressionVel
+		nextGrounded |= 1 << uint(i)
+		totalSpringForceY += springForce
+	}
+	next.Grounded = nextGrounded
+
+	// ---- Vertical body dynamics ----
+	//
+	// Net vertical acceleration = (totalSpringForce / mass) - g.
+	// Integrated semi-implicitly into LinearVel[1]; Position[1] updated in the
+	// world-frame integration block below.
+	{
+		var vertAccel float32
+		if nextGrounded != 0 {
+			vertAccel = totalSpringForceY/c.Mass - g
+		} else {
+			vertAccel = -g
+		}
+		next.LinearVel[1] = comVY + vertAccel*dt
+	}
+
+	// ---- Step 4: per-wheel load with weight transfer (static + dynamic) ----
 	//
 	// Longitudinal transfer (braking shifts forward, throttle shifts rearward):
 	//   dWlong = m * ax * h / L   (sign: ax > 0 = accelerating forward
@@ -224,7 +360,11 @@ func Step(s State, in Input, c Constants, dt float32) State {
 	next.WheelLoad[3] = halfRear + dWlong*0.5 + dWlatRear   // RR
 
 	// Clamp to zero (wheel lifts off; cannot push downward on ground).
+	// Also zero out loads for wheels that have no ground contact.
 	for i := range next.WheelLoad {
+		if nextGrounded&(1<<uint(i)) == 0 {
+			next.WheelLoad[i] = 0
+		}
 		if next.WheelLoad[i] < 0 {
 			next.WheelLoad[i] = 0
 		}
