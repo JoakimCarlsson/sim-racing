@@ -5,6 +5,7 @@ import (
 
 	"github.com/JoakimCarlsson/sim-racing/internal/physics"
 	"github.com/JoakimCarlsson/sim-racing/internal/protocol"
+	"github.com/JoakimCarlsson/sim-racing/internal/track"
 )
 
 // PlayerID is the on-wire player identifier.
@@ -24,6 +25,10 @@ type PlayerSim struct {
 	State          physics.State
 	Constants      physics.Constants
 	LastAppliedSeq uint32
+	// WheelsOff is the number of wheel contact patches currently outside the
+	// track limits polygon (0..4). It is recomputed every tick. Zero when the
+	// World has no Limits polygon configured.
+	WheelsOff uint8
 }
 
 // World holds the collection of all active PlayerSims and the simulation
@@ -36,6 +41,11 @@ type World struct {
 	// Ground is the GroundSampler used for per-wheel height queries in every
 	// physics tick. Defaults to physics.FlatGround(0) when nil.
 	Ground physics.GroundSampler
+	// Limits is the 2-D driveable-surface polygon for this track. When non-nil
+	// and has at least 3 vertices, each tick counts how many wheel contact
+	// patches lie outside it and stores the result in PlayerSim.WheelsOff.
+	// A nil or short Limits polygon disables the check (WheelsOff stays 0).
+	Limits track.Polygon2D
 	// bcastBuf is the broadcaster's pre-allocated scratch space, owned
 	// exclusively by RunBroadcaster / broadcastOnce and never accessed from
 	// other goroutines.

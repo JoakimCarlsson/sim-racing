@@ -6,6 +6,7 @@ import (
 
 	"github.com/JoakimCarlsson/sim-racing/internal/physics"
 	"github.com/JoakimCarlsson/sim-racing/internal/protocol"
+	"github.com/JoakimCarlsson/sim-racing/internal/track"
 )
 
 // maxCatchupTicks is the maximum number of queued inputs applied per player
@@ -43,6 +44,7 @@ func (w *World) tick(dt float32) {
 		ps = append(ps, p)
 	}
 	ground := w.Ground
+	limits := w.Limits
 	w.mu.Unlock()
 
 	// Fall back to flat ground if the World has no sampler configured.
@@ -80,5 +82,29 @@ func (w *World) tick(dt float32) {
 				dt,
 			)
 		}
+
+		// Count how many wheel contact patches are outside the limits polygon.
+		p.WheelsOff = countWheelsOff(p.State, p.Constants, limits)
 	}
+}
+
+// countWheelsOff returns the number of wheel contact patches (0..4) that lie
+// outside the given limits polygon. Returns 0 when limits is nil or has fewer
+// than 3 vertices (check disabled).
+func countWheelsOff(
+	s physics.State,
+	c physics.Constants,
+	limits track.Polygon2D,
+) uint8 {
+	if len(limits) < 3 {
+		return 0
+	}
+	pts := physics.WheelXZ(s, c)
+	var off uint8
+	for _, pt := range pts {
+		if !limits.Contains(pt[0], pt[1]) {
+			off++
+		}
+	}
+	return off
 }
