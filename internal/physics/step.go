@@ -217,9 +217,6 @@ func Step(
 	//   c_i = restLength - (wheelBaseY - groundH_i)
 	// Ground contact iff c_i > 0.
 
-	halfWBSusp := c.Wheelbase / 2.0
-	halfTrack := c.TrackWidth / 2.0
-
 	// Suspension parameter defaults (fall back if unset in Constants).
 	springK := c.SuspensionSpringK
 	if springK <= 0 {
@@ -234,32 +231,13 @@ func Step(
 		restLen = 0.30
 	}
 
-	// Yaw-rotation helper for body-frame XZ → world-frame XZ.
-	// For a yaw-only quaternion [0, qy, 0, qw]:
-	//   sinYaw = 2*qw*qy,  cosYaw = 1 - 2*qy²
-	curQy := s.Orientation[1]
-	curQw := s.Orientation[3]
-	sinYaw := 2 * curQw * curQy
-	cosYaw := 1 - 2*curQy*curQy
-
-	rotXZ := func(bx, bz float32) (wx, wz float32) {
-		wx = cosYaw*bx - sinYaw*bz
-		wz = sinYaw*bx + cosYaw*bz
-		return
-	}
+	// Wheel contact-patch XZ positions in world space.
+	// WheelXZ encapsulates the yaw-rotation (sinYaw/cosYaw) + body offsets
+	// (halfTrack, halfWB) so this formula stays in exactly one place.
+	wheelXZ := WheelXZ(s, c)
 
 	// Y coordinate of the wheel contact patches in world space.
 	wheelBaseY := s.Position[1] - cgH
-
-	// Body-frame XZ offsets per wheel (X=right, Z=forward in vehicle frame).
-	// Order: FL=0, FR=1, RL=2, RR=3.
-	type wOff struct{ bx, bz float32 }
-	offsets := [4]wOff{
-		{+halfTrack, +halfWBSusp}, // FL
-		{-halfTrack, +halfWBSusp}, // FR
-		{+halfTrack, -halfWBSusp}, // RL
-		{-halfTrack, -halfWBSusp}, // RR
-	}
 
 	// CoM vertical velocity in world space (≈ LinearVel[1] for small angles).
 	comVY := s.LinearVel[1]
@@ -268,10 +246,9 @@ func Step(
 	var totalSpringForceY float32
 
 	var nextGrounded uint8
-	for i, off := range offsets {
-		wx, wz := rotXZ(off.bx, off.bz)
-		wheelWX := s.Position[0] + wx
-		wheelWZ := s.Position[2] + wz
+	for i := range wheelXZ {
+		wheelWX := wheelXZ[i][0]
+		wheelWZ := wheelXZ[i][1]
 
 		groundH, _, ok := sampler.Sample(wheelWX, wheelWZ)
 		if !ok {

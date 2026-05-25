@@ -96,9 +96,13 @@ func loadTrack(dir string, world *sim.World) {
 		world.Ground = hm
 	}
 
+	// Wire the limits polygon into the world for per-tick WheelsOff counting.
+	world.Limits = tr.LimitsPolygon
+
 	log.Printf(
-		"track loaded: id=%s heights=%s",
+		"track loaded: id=%s heights=%s limits_verts=%d",
 		tr.ID,
 		heightsDesc,
+		len(tr.LimitsPolygon),
 	)
 }
