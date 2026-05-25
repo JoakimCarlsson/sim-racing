@@ -99,6 +99,10 @@ func loadTrack(dir string, world *sim.World) {
 	// Wire the limits polygon into the world for per-tick WheelsOff counting.
 	world.Limits = tr.LimitsPolygon
 
+	// Wire sector planes and start/finish gate.
+	world.StartFinish = tr.StartFinish
+	world.Sectors = tr.Sectors
+
 	log.Printf(
 		"track loaded: id=%s heights=%s limits_verts=%d",
 		tr.ID,

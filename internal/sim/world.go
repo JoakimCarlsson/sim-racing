@@ -29,6 +29,17 @@ type PlayerSim struct {
 	// track limits polygon (0..4). It is recomputed every tick. Zero when the
 	// World has no Limits polygon configured.
 	WheelsOff uint8
+	// PrevPos is the position of the car at the end of the previous tick.
+	// It is used to detect plane crossings via the segment [PrevPos, State.Position].
+	PrevPos track.Vec3
+	// HasPrev is true once PrevPos has been initialised (after the first tick).
+	// Plane-crossing checks are skipped while HasPrev is false to avoid a
+	// spurious crossing on the very first tick when PrevPos is the zero vector.
+	HasPrev bool
+	// NextSector is the index into World.Sectors of the sector plane the car
+	// must cross next to continue an in-progress ordered sector traversal.
+	// Resets to 0 after a valid StartFinish crossing.
+	NextSector int
 }
 
 // World holds the collection of all active PlayerSims and the simulation
@@ -46,6 +57,12 @@ type World struct {
 	// patches lie outside it and stores the result in PlayerSim.WheelsOff.
 	// A nil or short Limits polygon disables the check (WheelsOff stays 0).
 	Limits track.Polygon2D
+	// StartFinish is the start/finish gate plane. When its Normal is non-zero,
+	// the tick loop checks for crossings each tick and logs them.
+	StartFinish track.Plane
+	// Sectors is the ordered list of sector gate planes. Crossings are logged
+	// only when the car traverses them in sectors[0]→[1]→…→startFinish order.
+	Sectors []track.Plane
 	// bcastBuf is the broadcaster's pre-allocated scratch space, owned
 	// exclusively by RunBroadcaster / broadcastOnce and never accessed from
 	// other goroutines.
@@ -54,8 +71,9 @@ type World struct {
 
 // Snapshot is an immutable copy of a PlayerSim used for broadcasting.
 type Snapshot struct {
-	ID    PlayerID
-	State physics.State
+	ID        PlayerID
+	State     physics.State
+	WheelsOff uint8
 }
 
 // New creates a World with default parameters (60 Hz, 16 inputs/tick).
@@ -106,7 +124,11 @@ func (w *World) Snapshots() []Snapshot {
 	defer w.mu.Unlock()
 	out := make([]Snapshot, 0, len(w.players))
 	for _, p := range w.players {
-		out = append(out, Snapshot{ID: p.ID, State: p.State})
+		out = append(out, Snapshot{
+			ID:        p.ID,
+			State:     p.State,
+			WheelsOff: p.WheelsOff,
+		})
 	}
 	return out
 }

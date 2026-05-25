@@ -1,5 +1,5 @@
 {
-  "asset": { "version": "2.0", "generator": "sim-racing placeholder" },
+  "asset": { "version": "2.0", "generator": "sim-racing baked" },
   "scene": 0,
   "scenes": [{ "nodes": [0] }],
   "nodes": [{ "mesh": 0 }],
@@ -20,39 +20,39 @@
       "bufferView": 0,
       "byteOffset": 0,
       "componentType": 5123,
-      "count": 6,
+      "count": 18,
       "type": "SCALAR",
-      "max": [3],
+      "max": [7],
       "min": [0]
     },
     {
       "bufferView": 1,
       "byteOffset": 0,
       "componentType": 5126,
-      "count": 4,
+      "count": 8,
       "type": "VEC3",
-      "max": [10.0, 0.0, 10.0],
-      "min": [-10.0, 0.0, -10.0]
+      "max": [14.0, 0.0, 14.0],
+      "min": [-14.0, 0.0, -14.0]
     }
   ],
   "bufferViews": [
     {
       "buffer": 0,
       "byteOffset": 0,
-      "byteLength": 12,
+      "byteLength": 36,
       "target": 34963
     },
     {
       "buffer": 0,
-      "byteOffset": 12,
-      "byteLength": 48,
+      "byteOffset": 36,
+      "byteLength": 96,
       "target": 34962
     }
   ],
   "buffers": [
     {
-      "byteLength": 60,
-      "uri": "data:application/octet-stream;base64,AAABAAIAAAACAAMAAAAgwQAAAAAAACDBAAAgQQAAAAAAACDBAAAgQQAAAAAAACBBAAAgwQAAAAAAACBB"
+      "byteLength": 132,
+      "uri": "data:application/octet-stream;base64,AAABAAIAAAACAAMAAAADAAQAAAAEAAUAAAAFAAYAAAAGAAcAAABgwQAAAAAAAGDBAABgQQAAAAAAAGDBAABgQQAAAAAAAIDAAADAQAAAAAAAAIDAAADAQAAAAAAAAGBBAADAwAAAAAAAAGBBAADAwAAAAAAAAIDAAABgwQAAAAAAAIDA"
     }
   ]
 }

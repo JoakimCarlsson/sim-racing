@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/JoakimCarlsson/sim-racing/internal/physics"
@@ -54,6 +55,9 @@ func (w *World) tick(dt float32) {
 
 	scratch := make([]protocol.ClientInput, w.MaxInputsPerTick)
 	for _, p := range ps {
+		// Capture position before physics advances it, for crossing detection.
+		prevPos := track.Vec3(p.State.Position)
+
 		n := p.Source.DrainInputs(scratch[:w.MaxInputsPerTick])
 
 		// Apply inputs in sequence order, skipping any seq <= LastAppliedSeq.
@@ -85,6 +89,16 @@ func (w *World) tick(dt float32) {
 
 		// Count how many wheel contact patches are outside the limits polygon.
 		p.WheelsOff = countWheelsOff(p.State, p.Constants, limits)
+
+		// Detect sector / start-finish crossings using the segment
+		// [prevPos, curPos].  Skip the very first tick (HasPrev==false)
+		// to avoid a spurious crossing when PrevPos is the zero vector.
+		curPos := track.Vec3(p.State.Position)
+		if p.HasPrev {
+			checkSectorCrossings(w, p, p.PrevPos, curPos)
+		}
+		p.PrevPos = prevPos
+		p.HasPrev = true
 	}
 }
 
@@ -107,4 +121,62 @@ func countWheelsOff(
 		}
 	}
 	return off
+}
+
+// checkSectorCrossings detects whether the segment [prev, cur] crosses any
+// sector gate or the start/finish line and logs each event. Sector crossings
+// are only logged when they occur in order (sectors[0] → [1] → … → startFinish).
+//
+// This function is called from tick after physics.Step so the caller can supply
+// the pre-step position as prev and the post-step position as cur.
+//
+// checkSectorCrossings is package-private so it can be called directly from
+// sector_test.go without running the full physics tick loop.
+func checkSectorCrossings(w *World, p *PlayerSim, prev, cur track.Vec3) {
+	w.mu.Lock()
+	sectors := w.Sectors
+	startFinish := w.StartFinish
+	w.mu.Unlock()
+
+	// Check the next expected sector gate.
+	if len(sectors) > 0 && p.NextSector < len(sectors) {
+		gate := sectors[p.NextSector]
+		if crossed, _ := gate.Crossed(prev, cur); crossed {
+			sectorNum := p.NextSector + 1 // 1-based for readability
+			log.Printf(
+				"sector crossing playerID=%d sector %d",
+				p.ID,
+				sectorNum,
+			)
+			p.NextSector++
+		}
+		// Do not fall through to startFinish if no sectors remain yet.
+		if p.NextSector < len(sectors) {
+			return
+		}
+	}
+
+	// Check the start/finish gate (only valid after all sectors are cleared,
+	// or when no sectors are configured).
+	if allSectorsCleared(p, sectors) {
+		sfNonZero := startFinish.Normal[0] != 0 ||
+			startFinish.Normal[1] != 0 ||
+			startFinish.Normal[2] != 0
+		if sfNonZero {
+			if crossed, _ := startFinish.Crossed(prev, cur); crossed {
+				log.Printf(
+					"sector crossing playerID=%d startFinish",
+					p.ID,
+				)
+				// Reset for the next lap.
+				p.NextSector = 0
+			}
+		}
+	}
+}
+
+// allSectorsCleared reports whether the player has traversed all configured
+// sector gates and is now eligible to cross the start/finish line.
+func allSectorsCleared(p *PlayerSim, sectors []track.Plane) bool {
+	return len(sectors) == 0 || p.NextSector >= len(sectors)
 }
