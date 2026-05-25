@@ -39,6 +39,11 @@ func TestLoad_Circuit01_Golden(t *testing.T) {
 	if n[0] == 0 && n[1] == 0 && n[2] == 0 {
 		t.Error("StartFinish.Normal must not be zero vector")
 	}
+
+	// circuit01 must have exactly 3 sector planes (AC4).
+	if len(tr.Sectors) != 3 {
+		t.Errorf("Sectors: want 3, got %d", len(tr.Sectors))
+	}
 }
 
 // TestValidate_RejectsBadInputs is table-driven and checks that Validate and
