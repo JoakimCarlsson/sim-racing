@@ -21,5 +21,6 @@ func NewHandler(deps Deps) http.Handler {
 	r := router.New()
 	registerHealth(r, deps)
 	registerRealtime(r, deps)
+	registerDebug(r, deps)
 	return r
 }
