@@ -101,6 +101,7 @@ func loadFixture(t *testing.T) []replayRecord {
 func hashStateStream(records []replayRecord) [32]byte {
 	c := physics.DefaultConstants
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		Gear:        1,
 		Orientation: [4]float32{0, 0, 0, 1},
 	}
@@ -124,7 +125,7 @@ func hashStateStream(records []replayRecord) [32]byte {
 			Gear:      r.Gear,
 			Handbrake: r.Handbrake != 0,
 		}
-		s = physics.Step(s, in, c, replayDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), replayDT)
 
 		if (i+1)%replayHz == 0 {
 			writeF32(s.Position[0])
@@ -164,6 +165,7 @@ func hashStateStream(records []replayRecord) [32]byte {
 func replayStates(records []replayRecord) []physics.State {
 	c := physics.DefaultConstants
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		Gear:        1,
 		Orientation: [4]float32{0, 0, 0, 1},
 	}
@@ -176,7 +178,7 @@ func replayStates(records []replayRecord) []physics.State {
 			Gear:      r.Gear,
 			Handbrake: r.Handbrake != 0,
 		}
-		s = physics.Step(s, in, c, replayDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), replayDT)
 		if (i+1)%replayHz == 0 {
 			sampled = append(sampled, s)
 		}

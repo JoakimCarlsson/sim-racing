@@ -42,7 +42,13 @@ func (w *World) tick(dt float32) {
 	for _, p := range w.players {
 		ps = append(ps, p)
 	}
+	ground := w.Ground
 	w.mu.Unlock()
+
+	// Fall back to flat ground if the World has no sampler configured.
+	if ground == nil {
+		ground = physics.FlatGround(0)
+	}
 
 	scratch := make([]protocol.ClientInput, w.MaxInputsPerTick)
 	for _, p := range ps {
@@ -57,7 +63,7 @@ func (w *World) tick(dt float32) {
 			if in.Seq <= p.LastAppliedSeq {
 				continue
 			}
-			p.State = physics.Step(p.State, in.Input, p.Constants, dt)
+			p.State = physics.Step(p.State, in.Input, p.Constants, ground, dt)
 			p.LastAppliedSeq = in.Seq
 			applied++
 		}
@@ -66,7 +72,13 @@ func (w *World) tick(dt float32) {
 		// a zero (coast) input so the car continues to respond to physics
 		// (e.g. drag, rolling resistance).
 		if applied == 0 {
-			p.State = physics.Step(p.State, physics.Input{}, p.Constants, dt)
+			p.State = physics.Step(
+				p.State,
+				physics.Input{},
+				p.Constants,
+				ground,
+				dt,
+			)
 		}
 	}
 }

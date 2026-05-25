@@ -14,6 +14,7 @@ import (
 func TestStepZeroAllocs(t *testing.T) {
 	c := physics.DefaultConstants
 	s := physics.State{
+		Position:  [3]float32{0, suspGroundY, 0},
 		LinearVel: [3]float32{0, 0, 0},
 		Gear:      1,
 	}
@@ -23,9 +24,11 @@ func TestStepZeroAllocs(t *testing.T) {
 		Gear:     1,
 	}
 	dt := float32(tickDT)
+	// Create sampler outside the hot loop to avoid repeated interface boxing.
+	sampler := physics.FlatGround(0)
 
 	allocs := testing.AllocsPerRun(1000, func() {
-		s = physics.Step(s, in, c, dt)
+		s = physics.Step(s, in, c, sampler, dt)
 	})
 
 	if allocs != 0 {

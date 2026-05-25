@@ -33,6 +33,7 @@ func totalNormalForce(c physics.Constants, vMs float32) float32 {
 func TestWheelLoad_StaticSum(t *testing.T) {
 	c := physics.DefaultConstants
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, 0},
 		Orientation: [4]float32{0, 0, 0, 1},
 		Gear:        0,
@@ -40,7 +41,7 @@ func TestWheelLoad_StaticSum(t *testing.T) {
 	}
 	in := physics.Input{Gear: 0}
 
-	next := physics.Step(s, in, c, tickDT)
+	next := physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 
 	wlSum := next.WheelLoad[0] + next.WheelLoad[1] +
 		next.WheelLoad[2] + next.WheelLoad[3]
@@ -73,6 +74,7 @@ func TestWheelLoad_DynamicSum(t *testing.T) {
 	c := physics.DefaultConstants
 	v := float32(100 * kmhToMs)
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, v},
 		Orientation: [4]float32{0, 0, 0, 1},
 		Gear:        4,
@@ -85,7 +87,7 @@ func TestWheelLoad_DynamicSum(t *testing.T) {
 		Gear:     4,
 	}
 
-	next := physics.Step(s, in, c, tickDT)
+	next := physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 
 	wlSum := next.WheelLoad[0] + next.WheelLoad[1] +
 		next.WheelLoad[2] + next.WheelLoad[3]
@@ -121,6 +123,7 @@ func TestWheelLoad_BrakeShiftsForward(t *testing.T) {
 	staticFront := staticTotal * c.WeightDistributionFront
 
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, v},
 		Orientation: [4]float32{0, 0, 0, 1},
 		Gear:        4,
@@ -133,7 +136,7 @@ func TestWheelLoad_BrakeShiftsForward(t *testing.T) {
 		Gear:     4,
 	}
 
-	next := physics.Step(s, in, c, tickDT)
+	next := physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 
 	frontLoad := next.WheelLoad[0] + next.WheelLoad[1]
 	if frontLoad <= staticFront {
@@ -157,6 +160,7 @@ func TestWheelLoad_ThrottleShiftsRear(t *testing.T) {
 	staticRear := staticTotal * (1.0 - c.WeightDistributionFront)
 
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, v},
 		Orientation: [4]float32{0, 0, 0, 1},
 		Gear:        3,
@@ -169,7 +173,7 @@ func TestWheelLoad_ThrottleShiftsRear(t *testing.T) {
 		Gear:     3,
 	}
 
-	next := physics.Step(s, in, c, tickDT)
+	next := physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 
 	rearLoad := next.WheelLoad[2] + next.WheelLoad[3]
 	if rearLoad <= staticRear {
@@ -191,6 +195,7 @@ func TestWheelLoad_CorneringShiftsOutside(t *testing.T) {
 	// Run to steady-state cornering to have a meaningful yaw rate and lateral acc.
 	v := float32(60 * kmhToMs)
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, v},
 		Orientation: [4]float32{0, 0, 0, 1},
 		Gear:        3,
@@ -206,11 +211,11 @@ func TestWheelLoad_CorneringShiftsOutside(t *testing.T) {
 	// Run for 5 s to build steady-state lateral acceleration.
 	ticks := int(5 * tickHz)
 	for i := 0; i < ticks; i++ {
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 	}
 
 	// One more step with load capture.
-	next := physics.Step(s, in, c, tickDT)
+	next := physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 
 	// Left turn → centrifugal force pushes mass to the right → outside wheels
 	// are FR (index 1) and RR (index 3).
@@ -248,8 +253,18 @@ func TestPacejka_LoadSensitive(t *testing.T) {
 
 	// Common state: constant moderate speed, no yaw yet, mild steer.
 	v := float32(60 * kmhToMs)
-	makeState := func() physics.State {
+	// equilY returns the suspension equilibrium CoM height for a given Constants.
+	equilY := func(cc physics.Constants) float32 {
+		const g = float32(9.81)
+		k := cc.SuspensionSpringK
+		if k <= 0 {
+			k = 40000
+		}
+		return cc.CGHeight + cc.SuspensionRestLength - cc.Mass*g/(4*k)
+	}
+	makeState := func(cc physics.Constants) physics.State {
 		return physics.State{
+			Position:    [3]float32{0, equilY(cc), 0},
 			LinearVel:   [3]float32{0, 0, v},
 			Orientation: [4]float32{0, 0, 0, 1},
 			Gear:        3,
@@ -264,12 +279,18 @@ func TestPacejka_LoadSensitive(t *testing.T) {
 	}
 
 	// Run both to a quasi-steady state (5 s).
-	sBase := makeState()
-	sScaled := makeState()
+	sBase := makeState(baseC)
+	sScaled := makeState(scaledC)
 	ticks := int(5 * tickHz)
 	for i := 0; i < ticks; i++ {
-		sBase = physics.Step(sBase, in, baseC, tickDT)
-		sScaled = physics.Step(sScaled, in, scaledC, tickDT)
+		sBase = physics.Step(sBase, in, baseC, physics.FlatGround(0), tickDT)
+		sScaled = physics.Step(
+			sScaled,
+			in,
+			scaledC,
+			physics.FlatGround(0),
+			tickDT,
+		)
 	}
 
 	// Lateral force proxy: m * ay = m * r * v

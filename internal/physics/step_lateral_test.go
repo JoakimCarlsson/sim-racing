@@ -30,6 +30,7 @@ func TestLateral_SkidpadSteadyState(t *testing.T) {
 	// Seed: moving at 60 km/h forward, gear 3, no yaw.
 	startV := float32(60 * kmhToMs)
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, startV},
 		Orientation: [4]float32{0, 0, 0, 1}, // identity quaternion
 		Gear:        3,
@@ -46,7 +47,7 @@ func TestLateral_SkidpadSteadyState(t *testing.T) {
 	// Run for 10 s to reach steady state.
 	ticks := int(10 * tickHz)
 	for i := 0; i < ticks; i++ {
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 	}
 
 	// Lateral acceleration = yaw_rate * v_long (centripetal, body frame).
@@ -81,6 +82,7 @@ func TestLateral_Slalom(t *testing.T) {
 	runSteadyState := func(steer float32) float32 {
 		startV := float32(60 * kmhToMs)
 		s := physics.State{
+			Position:    [3]float32{0, suspGroundY, 0},
 			LinearVel:   [3]float32{0, 0, startV},
 			Orientation: [4]float32{0, 0, 0, 1},
 			Gear:        3,
@@ -94,7 +96,7 @@ func TestLateral_Slalom(t *testing.T) {
 		}
 		ticks := int(10 * tickHz)
 		for i := 0; i < ticks; i++ {
-			s = physics.Step(s, in, c, tickDT)
+			s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 		}
 		yawRate := s.AngularVel[1]
 		vLong := s.LinearVel[2]
@@ -139,6 +141,7 @@ func TestLateral_YawDecay(t *testing.T) {
 
 	// Seed: moving at 40 km/h with an initial yaw rate of 1.0 rad/s.
 	s := physics.State{
+		Position:    [3]float32{0, suspGroundY, 0},
 		LinearVel:   [3]float32{0, 0, float32(40 * kmhToMs)},
 		AngularVel:  [3]float32{0, 1.0, 0}, // 1 rad/s yaw
 		Orientation: [4]float32{0, 0, 0, 1},
@@ -156,7 +159,7 @@ func TestLateral_YawDecay(t *testing.T) {
 	const maxSecs = 5.0
 	ticks := int(maxSecs * tickHz)
 	for i := 0; i < ticks; i++ {
-		s = physics.Step(s, in, c, tickDT)
+		s = physics.Step(s, in, c, physics.FlatGround(0), tickDT)
 	}
 
 	finalYawRate := s.AngularVel[1]

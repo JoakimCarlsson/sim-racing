@@ -77,7 +77,7 @@ func jsStep(_ js.Value, args []js.Value) any {
 	s := decodeState(stateBuf)
 	in := decodeInput(inputBuf)
 
-	next := physics.Step(s, in, physics.DefaultConstants, dt)
+	next := physics.Step(s, in, physics.DefaultConstants, physics.FlatGround(0), dt)
 
 	out := make([]byte, 96)
 	encodeState(out, next)
