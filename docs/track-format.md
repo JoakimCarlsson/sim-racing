@@ -102,6 +102,18 @@ A boundary defined by two endpoints and an outward normal.
 | `p1` | Vec3 | Right endpoint of the gate line. |
 | `normal` | Vec3 | Unit vector perpendicular to the gate, pointing in the direction of valid crossing. Must not be a zero vector. |
 
+### Sector ordering
+
+The `sectors` array must be ordered by traversal sequence: `sectors[0]` is the
+first sector boundary a car encounters after crossing the start/finish plane,
+`sectors[1]` is the second, and so on.  The lap state machine (M5) depends on
+this ordering to validate lap splits.
+
+Gates that are crossed in a direction opposite to their `normal` are still
+detected; the crossing direction can be inferred from the sign of
+`dot(motion, plane.Normal)` — positive means forward (same direction as the
+normal), negative means reverse.
+
 ### limitsPolygon
 
 A flat ordered sequence of `[x, z]` vertices that define the driveable
@@ -116,6 +128,28 @@ from above (+Y looking down). At least **3** vertices are required.
   [-50.0,  50.0]
 ]
 ```
+
+## Plane.Crossed — boundary semantics
+
+`Plane.Crossed(prev, cur Vec3) (crossed bool, t float32)` detects whether the
+segment from `prev` to `cur` crosses the gate in the XZ plane (Y is ignored;
+all gates are assumed to lie on Y=0).
+
+The fractional crossing position `t ∈ (0, 1]` measures how far along the tick's
+motion vector the crossing occurred.  `t=0.5` means the car was halfway through
+its step when it reached the gate.
+
+### Boundary policy
+
+| Condition | Outcome | Rationale |
+|---|---|---|
+| `signedPrev == 0` | `crossed = false` | The previous tick already sat exactly on the plane.  Counting this tick as a fresh crossing would double-fire the event. |
+| `signedCur == 0` with `signedPrev != 0` | `crossed = true`, `t = 1.0` | The car arrives exactly on the plane this tick; count it once, here. |
+| Same-side (`signedPrev` and `signedCur` same sign) | `crossed = false` | No straddle; no crossing detected. |
+| Lateral miss (crossing point outside gate segment) | `crossed = false` | The car passed the infinite plane but not through the physical gate. |
+
+These rules are deterministic: the same `(prev, cur)` pair always produces the
+same result regardless of tick rate or floating-point rounding order.
 
 ## Validation rules
 
@@ -215,7 +249,11 @@ normals `[0,1,0]`.
     "p1": [5, 0, 0],
     "normal": [0, 0, 1]
   },
-  "sectors": [],
+  "sectors": [
+    { "p0": [6, 0, -5],   "p1": [14, 0, -5],  "normal": [0, 0, -1] },
+    { "p0": [-14, 0, -12],"p1": [14, 0, -12], "normal": [-1, 0, 0] },
+    { "p0": [-14, 0, -5], "p1": [-6, 0, -5],  "normal": [0, 0, 1]  }
+  ],
   "limitsPolygon": [
     [-50, -50],
     [50, -50],
